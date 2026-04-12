@@ -13,14 +13,18 @@ export default function GenerateQR() {
   const [sessionCode, setSessionCode] = useState('');
   const [sessionId, setSessionId] = useState('');
   const [isActive, setIsActive] = useState(false);
-  const [attendees, setAttendees] = useState([]);
-  const [allStudents, setAllStudents] = useState([]);
+  const [attendees, setAttendees] = useState<any[]>([]);
+  const [absentees, setAbsentees] = useState<any[]>([]);
+  const [allStudents, setAllStudents] = useState<any[]>([]);
   const [selectedClass, setSelectedClass] = useState<any>(null);
   const [timetable, setTimetable] = useState([]);
   const [bleCode, setBleCode] = useState('');
+  const [sessionExpired, setSessionExpired] = useState(false);
+  const [timeLeft, setTimeLeft] = useState(0);
 
   useEffect(() => {
     loadTimetable();
+    loadAllStudents();
   }, []);
 
   useEffect(() => {
@@ -32,6 +36,22 @@ export default function GenerateQR() {
     }
   }, [isActive, sessionId]);
 
+  useEffect(() => {
+    if (isActive && timeLeft > 0) {
+      const timer = setInterval(() => {
+        setTimeLeft(prev => {
+          if (prev <= 1) {
+            clearInterval(timer);
+            endSessionAuto();
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+      return () => clearInterval(timer);
+    }
+  }, [isActive, timeLeft]);
+
   const loadTimetable = () => {
     const t = db.getAllSync(`
       SELECT timetable.*, lecturers.name as lec_name, venues.name as venue_name
@@ -42,22 +62,45 @@ export default function GenerateQR() {
     setTimetable(t);
   };
 
+  const loadAllStudents = () => {
+    const students = db.getAllSync(`SELECT * FROM students`);
+    setAllStudents(students);
+  };
+
   const loadAttendees = () => {
     if (!sessionId) return;
     const present = db.getAllSync(`
       SELECT attendance.*, students.name, students.surname, students.reg_number
       FROM attendance
       LEFT JOIN students ON attendance.student_id = students.id
-      WHERE attendance.timetable_id = ? AND attendance.date = date('now')
+      WHERE attendance.timetable_id = ? AND attendance.date = date('now') AND attendance.status = 'present'
     `, [sessionId]);
-    setAttendees(present);
 
-    const all = db.getAllSync(`SELECT * FROM students`);
-    setAllStudents(all);
+    const absent = db.getAllSync(`
+      SELECT attendance.*, students.name, students.surname, students.reg_number
+      FROM attendance
+      LEFT JOIN students ON attendance.student_id = students.id
+      WHERE attendance.timetable_id = ? AND attendance.date = date('now') AND attendance.status = 'absent'
+    `, [sessionId]);
+
+    setAttendees(present);
+    setAbsentees(absent);
   };
 
   const generateCode = () => {
     return Math.floor(1000 + Math.random() * 9000).toString();
+  };
+
+  const initializeAttendance = (classId: number) => {
+    const students = db.getAllSync(`SELECT * FROM students`);
+    students.forEach((student: any) => {
+      try {
+        db.runSync(
+          `INSERT OR IGNORE INTO attendance (student_id, timetable_id, date, status) VALUES (?, ?, date('now'), 'absent')`,
+          [student.id, classId]
+        );
+      } catch (e) {}
+    });
   };
 
   const startQRSession = (classItem: any) => {
@@ -67,14 +110,10 @@ export default function GenerateQR() {
     setSelectedClass(classItem);
     setIsActive(true);
     setMode('qr');
-
-    try {
-      db.runSync(`
-        INSERT OR IGNORE INTO attendance (student_id, timetable_id, date, status)
-        SELECT id, ?, date('now'), 'absent'
-        FROM students
-      `, [classItem.id]);
-    } catch (e) {}
+    setSessionExpired(false);
+    setTimeLeft(classItem.end_time ? 3600 : 3600);
+    initializeAttendance(classItem.id);
+    loadAttendees();
   };
 
   const startBLESession = (classItem: any) => {
@@ -84,28 +123,34 @@ export default function GenerateQR() {
     setSelectedClass(classItem);
     setIsActive(true);
     setMode('ble');
+    setSessionExpired(false);
+    setTimeLeft(3600);
+    initializeAttendance(classItem.id);
+    loadAttendees();
+  };
 
-    try {
-      db.runSync(`
-        INSERT OR IGNORE INTO attendance (student_id, timetable_id, date, status)
-        SELECT id, ?, date('now'), 'absent'
-        FROM students
-      `, [classItem.id]);
-    } catch (e) {}
+  const endSessionAuto = () => {
+    setIsActive(false);
+    setSessionExpired(true);
+    loadAttendees();
+    Alert.alert(
+      'Session Ended',
+      'The attendance session has ended. Students who did not confirm are marked absent.'
+    );
   };
 
   const endSession = () => {
     Alert.alert(
       'End Session',
-      'Are you sure you want to end attendance?',
+      'Are you sure you want to end attendance? Students who have not confirmed will be marked absent.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'End', style: 'destructive', onPress: () => {
+          text: 'End Session',
+          style: 'destructive',
+          onPress: () => {
             setIsActive(false);
-            setMode('');
-            setSessionCode('');
-            setBleCode('');
+            setSessionExpired(true);
             loadAttendees();
           }
         }
@@ -115,9 +160,7 @@ export default function GenerateQR() {
 
   const downloadReport = async () => {
     const present = attendees;
-    const absent = allStudents.filter(
-      (s: any) => !present.find((a: any) => a.student_id === s.id)
-    );
+    const absent = absentees;
 
     const presentRows = present.map((a: any) => `
       <tr style="background:#e8f5e9">
@@ -153,15 +196,16 @@ export default function GenerateQR() {
           <h3>${selectedClass?.module} — ${selectedClass?.program}</h3>
           <p>Date: ${new Date().toDateString()}</p>
           <p>Venue: ${selectedClass?.venue_name}</p>
-
+          <p>Lecturer: ${selectedClass?.lec_name}</p>
           <div class="summary">
             <strong>Summary</strong><br/>
-            Total Students: ${allStudents.length}<br/>
+            Total Students: ${present.length + absent.length}<br/>
             Present: ${present.length}<br/>
             Absent: ${absent.length}<br/>
-            Attendance Rate: ${allStudents.length > 0 ? Math.round((present.length / allStudents.length) * 100) : 0}%
+            Attendance Rate: ${present.length + absent.length > 0
+              ? Math.round((present.length / (present.length + absent.length)) * 100)
+              : 0}%
           </div>
-
           <table>
             <tr>
               <th>Reg Number</th>
@@ -186,6 +230,12 @@ export default function GenerateQR() {
     }
   };
 
+  const formatTime = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${s < 10 ? '0' : ''}${s}`;
+  };
+
   return (
     <ScrollView style={styles.container}>
 
@@ -197,7 +247,7 @@ export default function GenerateQR() {
         <View style={{ width: 24 }} />
       </View>
 
-      {!isActive && (
+      {!isActive && !sessionExpired && (
         <>
           <Text style={styles.sectionTitle}>Select a Class</Text>
           {timetable.length === 0 ? (
@@ -243,6 +293,11 @@ export default function GenerateQR() {
           <Text style={styles.sessionSub}>{selectedClass?.module}</Text>
           <Text style={styles.sessionSub}>{selectedClass?.day} {selectedClass?.start_time} — {selectedClass?.end_time}</Text>
 
+          <View style={styles.timerRow}>
+            <Ionicons name="time-outline" size={18} color="#FFD700" />
+            <Text style={styles.timerText}>Session ends in: {formatTime(timeLeft)}</Text>
+          </View>
+
           <View style={styles.qrBox}>
             <QRCode
               value={sessionCode}
@@ -252,7 +307,9 @@ export default function GenerateQR() {
             />
           </View>
 
-          <Text style={styles.scanText}>Students scan this QR code to mark attendance</Text>
+          <Text style={styles.scanText}>
+            Students must scan this QR code and tap Confirm Present
+          </Text>
 
           <View style={styles.statsRow}>
             <View style={styles.statBox}>
@@ -260,14 +317,14 @@ export default function GenerateQR() {
               <Text style={styles.statLbl}>Present</Text>
             </View>
             <View style={styles.statBox}>
-              <Text style={[styles.statNum, { color: '#D85A30' }]}>
-                {allStudents.length - attendees.length}
-              </Text>
+              <Text style={[styles.statNum, { color: '#D85A30' }]}>{absentees.length}</Text>
               <Text style={styles.statLbl}>Absent</Text>
             </View>
             <View style={styles.statBox}>
               <Text style={[styles.statNum, { color: '#FFD700' }]}>
-                {allStudents.length > 0 ? Math.round((attendees.length / allStudents.length) * 100) : 0}%
+                {attendees.length + absentees.length > 0
+                  ? Math.round((attendees.length / (attendees.length + absentees.length)) * 100)
+                  : 0}%
               </Text>
               <Text style={styles.statLbl}>Rate</Text>
             </View>
@@ -284,12 +341,18 @@ export default function GenerateQR() {
         <View style={styles.sessionBox}>
           <Text style={styles.sessionTitle}>Bluetooth Attendance Active</Text>
           <Text style={styles.sessionSub}>{selectedClass?.module}</Text>
-          <Text style={styles.sessionSub}>{selectedClass?.day} {selectedClass?.start_time} — {selectedClass?.end_time}</Text>
+
+          <View style={styles.timerRow}>
+            <Ionicons name="time-outline" size={18} color="#FFD700" />
+            <Text style={styles.timerText}>Session ends in: {formatTime(timeLeft)}</Text>
+          </View>
 
           <View style={styles.bleCodeBox}>
             <Ionicons name="bluetooth" size={40} color="#534AB7" />
             <Text style={styles.bleCodeText}>{bleCode}</Text>
-            <Text style={styles.bleCodeSub}>Share this code with students in the room</Text>
+            <Text style={styles.bleCodeSub}>
+              Students must enter this code and tap Confirm Present
+            </Text>
           </View>
 
           <View style={styles.statsRow}>
@@ -298,14 +361,14 @@ export default function GenerateQR() {
               <Text style={styles.statLbl}>Present</Text>
             </View>
             <View style={styles.statBox}>
-              <Text style={[styles.statNum, { color: '#D85A30' }]}>
-                {allStudents.length - attendees.length}
-              </Text>
+              <Text style={[styles.statNum, { color: '#D85A30' }]}>{absentees.length}</Text>
               <Text style={styles.statLbl}>Absent</Text>
             </View>
             <View style={styles.statBox}>
               <Text style={[styles.statNum, { color: '#FFD700' }]}>
-                {allStudents.length > 0 ? Math.round((attendees.length / allStudents.length) * 100) : 0}%
+                {attendees.length + absentees.length > 0
+                  ? Math.round((attendees.length / (attendees.length + absentees.length)) * 100)
+                  : 0}%
               </Text>
               <Text style={styles.statLbl}>Rate</Text>
             </View>
@@ -318,7 +381,7 @@ export default function GenerateQR() {
         </View>
       )}
 
-      {!isActive && attendees.length > 0 && (
+      {(sessionExpired || !isActive) && (attendees.length > 0 || absentees.length > 0) && (
         <>
           <View style={styles.reportHeader}>
             <Text style={styles.sectionTitle}>Attendance Register</Text>
@@ -341,21 +404,18 @@ export default function GenerateQR() {
             </View>
           ))}
 
-          {allStudents
-            .filter((s: any) => !attendees.find((a: any) => a.student_id === s.id))
-            .map((s: any) => (
-              <View key={s.id} style={styles.absentCard}>
-                <View style={styles.attendeeLeft}>
-                  <View style={styles.absentDot} />
-                  <View>
-                    <Text style={styles.attendeeName}>{s.name} {s.surname}</Text>
-                    <Text style={styles.attendeeReg}>{s.reg_number}</Text>
-                  </View>
+          {absentees.map((a: any) => (
+            <View key={a.id} style={styles.absentCard}>
+              <View style={styles.attendeeLeft}>
+                <View style={styles.absentDot} />
+                <View>
+                  <Text style={styles.attendeeName}>{a.name} {a.surname}</Text>
+                  <Text style={styles.attendeeReg}>{a.reg_number}</Text>
                 </View>
-                <Text style={styles.absentLabel}>Absent</Text>
               </View>
-            ))
-          }
+              <Text style={styles.absentLabel}>Absent</Text>
+            </View>
+          ))}
         </>
       )}
 
@@ -376,9 +436,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 24,
   },
-  backBtn: {
-    padding: 4,
-  },
+  backBtn: { padding: 4 },
   title: {
     fontSize: 22,
     fontWeight: 'bold',
@@ -417,9 +475,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  classInfo: {
-    flex: 1,
-  },
+  classInfo: { flex: 1 },
   moduleName: {
     fontSize: 16,
     fontWeight: 'bold',
@@ -431,9 +487,7 @@ const styles = StyleSheet.create({
     color: '#a0c4ff',
     marginTop: 2,
   },
-  btnGroup: {
-    gap: 8,
-  },
+  btnGroup: { gap: 8 },
   qrBtn: {
     backgroundColor: '#1D9E75',
     padding: 10,
@@ -475,17 +529,32 @@ const styles = StyleSheet.create({
     color: '#a0c4ff',
     marginBottom: 2,
   },
+  timerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginVertical: 10,
+    backgroundColor: '#001f4d',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  timerText: {
+    color: '#FFD700',
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
   qrBox: {
     backgroundColor: '#ffffff',
     padding: 16,
     borderRadius: 16,
-    marginVertical: 20,
+    marginVertical: 16,
   },
   scanText: {
     fontSize: 13,
     color: '#a0c4ff',
     textAlign: 'center',
-    marginBottom: 20,
+    marginBottom: 16,
   },
   bleCodeBox: {
     alignItems: 'center',
@@ -494,7 +563,7 @@ const styles = StyleSheet.create({
     borderColor: '#534AB7',
     borderRadius: 16,
     padding: 24,
-    marginVertical: 20,
+    marginVertical: 16,
     width: '100%',
   },
   bleCodeText: {

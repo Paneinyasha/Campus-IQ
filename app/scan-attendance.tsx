@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
@@ -10,41 +11,62 @@ export default function ScanAttendance() {
   const [mode, setMode] = useState('');
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
+  const [scannedData, setScannedData] = useState('');
   const [bleCode, setBleCode] = useState('');
-  const [studentId, setStudentId] = useState('');
-  const [studentName, setStudentName] = useState('');
+  const [student, setStudent] = useState<any>(null);
   const [success, setSuccess] = useState(false);
+  const [alreadyMarked, setAlreadyMarked] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [pendingTimetableId, setPendingTimetableId] = useState('');
 
   useEffect(() => {
     loadStudent();
   }, []);
 
-  const loadStudent = () => {
+  const loadStudent = async () => {
     try {
-      const student = db.getFirstSync(`SELECT * FROM students LIMIT 1`);
-      if (student) {
-        setStudentId(String((student as any).id));
-        setStudentName(`${(student as any).name} ${(student as any).surname}`);
+      const saved = await AsyncStorage.getItem('current_student');
+      if (saved) {
+        setStudent(JSON.parse(saved));
       }
     } catch (e) {}
   };
 
+  const checkAlreadyMarked = (timetableId: string) => {
+    if (!student) return false;
+    const existing = db.getFirstSync(
+      `SELECT * FROM attendance WHERE student_id = ? AND timetable_id = ? AND date = date('now') AND status = 'present'`,
+      [student.id, timetableId]
+    );
+    return !!existing;
+  };
+
   const markPresent = (timetableId: string) => {
+    if (!student) {
+      Alert.alert('Error', 'You must be logged in');
+      return;
+    }
+
+    if (checkAlreadyMarked(timetableId)) {
+      setAlreadyMarked(true);
+      return;
+    }
+
     try {
       const existing = db.getFirstSync(
         `SELECT * FROM attendance WHERE student_id = ? AND timetable_id = ? AND date = date('now')`,
-        [studentId, timetableId]
+        [student.id, timetableId]
       );
 
       if (existing) {
         db.runSync(
           `UPDATE attendance SET status = 'present' WHERE student_id = ? AND timetable_id = ? AND date = date('now')`,
-          [studentId, timetableId]
+          [student.id, timetableId]
         );
       } else {
         db.runSync(
           `INSERT INTO attendance (student_id, timetable_id, date, status) VALUES (?, ?, date('now'), 'present')`,
-          [studentId, timetableId]
+          [student.id, timetableId]
         );
       }
       setSuccess(true);
@@ -56,13 +78,22 @@ export default function ScanAttendance() {
   const handleQRScan = ({ data }: { data: string }) => {
     if (scanned) return;
     setScanned(true);
+    setScannedData(data);
 
     if (data.startsWith('CAMPUSIQ_')) {
       const parts = data.split('_');
       const timetableId = parts[1];
-      markPresent(timetableId);
+
+      if (checkAlreadyMarked(timetableId)) {
+        setAlreadyMarked(true);
+        return;
+      }
+
+      setPendingTimetableId(timetableId);
+      setConfirming(true);
+      setMode('confirm-qr');
     } else {
-      Alert.alert('Invalid QR', 'This QR code is not a valid Campus IQ attendance code');
+      Alert.alert('Invalid QR', 'This is not a valid Campus IQ attendance QR code');
       setScanned(false);
     }
   };
@@ -74,45 +105,137 @@ export default function ScanAttendance() {
     }
 
     const session = db.getFirstSync(
-      `SELECT * FROM timetable LIMIT 1`
-    );
+      `SELECT * FROM timetable ORDER BY id DESC LIMIT 1`
+    ) as any;
 
     if (session) {
-      markPresent(String((session as any).id));
+      if (checkAlreadyMarked(String(session.id))) {
+        setAlreadyMarked(true);
+        return;
+      }
+      setPendingTimetableId(String(session.id));
+      setMode('confirm-ble');
     } else {
-      Alert.alert('Error', 'No active class session found');
+      Alert.alert('No Session', 'No active class session found. Ask your lecturer to start a session.');
     }
   };
 
+  const confirmPresent = () => {
+    markPresent(pendingTimetableId);
+    setConfirming(false);
+  };
+
+  const resetAll = () => {
+    setSuccess(false);
+    setAlreadyMarked(false);
+    setMode('');
+    setScanned(false);
+    setScannedData('');
+    setBleCode('');
+    setPendingTimetableId('');
+    setConfirming(false);
+  };
+
+  if (alreadyMarked) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.resultContainer}>
+          <View style={styles.alreadyCircle}>
+            <Ionicons name="checkmark-done" size={70} color="#FFD700" />
+          </View>
+          <Text style={styles.alreadyTitle}>Already Marked Present!</Text>
+          <Text style={styles.alreadyName}>{student?.name} {student?.surname}</Text>
+          <Text style={styles.alreadySub}>
+            You have already been marked present for this class today.
+          </Text>
+          <Text style={styles.alreadySub}>
+            No duplicate attendance is allowed.
+          </Text>
+          <TouchableOpacity style={styles.doneBtn} onPress={resetAll}>
+            <Text style={styles.doneBtnText}>OK</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+            <Ionicons name="arrow-back" size={18} color="#a0c4ff" />
+            <Text style={styles.backText}>Go Back</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
   if (success) {
     return (
-      <View style={styles.successContainer}>
-        <View style={styles.successCircle}>
-          <Ionicons name="checkmark" size={80} color="#1D9E75" />
+      <View style={styles.container}>
+        <View style={styles.resultContainer}>
+          <View style={styles.successCircle}>
+            <Ionicons name="checkmark" size={80} color="#1D9E75" />
+          </View>
+          <Text style={styles.successTitle}>Attendance Confirmed!</Text>
+          <Text style={styles.successName}>{student?.name} {student?.surname}</Text>
+          <Text style={styles.successReg}>{student?.reg_number}</Text>
+          <Text style={styles.successSub}>You have been marked present</Text>
+          <TouchableOpacity style={styles.doneBtn} onPress={resetAll}>
+            <Text style={styles.doneBtnText}>Done</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+            <Ionicons name="arrow-back" size={18} color="#a0c4ff" />
+            <Text style={styles.backText}>Go Back</Text>
+          </TouchableOpacity>
         </View>
-        <Text style={styles.successTitle}>Attendance Marked!</Text>
-        <Text style={styles.successName}>{studentName}</Text>
-        <Text style={styles.successSub}>You have been marked present</Text>
+      </View>
+    );
+  }
 
-        <TouchableOpacity
-          style={styles.doneBtn}
-          onPress={() => {
-            setSuccess(false);
-            setMode('');
-            setScanned(false);
-            setBleCode('');
-          }}
-        >
-          <Text style={styles.doneBtnText}>Done</Text>
-        </TouchableOpacity>
+  if (mode === 'confirm-qr') {
+    return (
+      <View style={styles.container}>
+        <View style={styles.resultContainer}>
+          <View style={styles.confirmCircle}>
+            <Ionicons name="qr-code" size={60} color="#1D9E75" />
+          </View>
+          <Text style={styles.confirmTitle}>QR Code Scanned!</Text>
+          <Text style={styles.confirmSub}>
+            Tap Confirm Present to mark your attendance
+          </Text>
+          <Text style={styles.confirmName}>{student?.name} {student?.surname}</Text>
+          <Text style={styles.confirmReg}>{student?.reg_number}</Text>
 
-        <TouchableOpacity
-          style={styles.backBtn}
-          onPress={() => router.back()}
-        >
-          <Ionicons name="arrow-back" size={18} color="#a0c4ff" />
-          <Text style={styles.backText}>Go Back</Text>
-        </TouchableOpacity>
+          <TouchableOpacity style={styles.confirmBtn} onPress={confirmPresent}>
+            <Ionicons name="checkmark-circle-outline" size={24} color="#ffffff" />
+            <Text style={styles.confirmBtnText}>Confirm Present</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.cancelBtn} onPress={resetAll}>
+            <Text style={styles.cancelBtnText}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  if (mode === 'confirm-ble') {
+    return (
+      <View style={styles.container}>
+        <View style={styles.resultContainer}>
+          <View style={[styles.confirmCircle, { borderColor: '#534AB7' }]}>
+            <Ionicons name="bluetooth" size={60} color="#534AB7" />
+          </View>
+          <Text style={styles.confirmTitle}>Code Accepted!</Text>
+          <Text style={styles.confirmSub}>
+            Tap Confirm Present to mark your attendance
+          </Text>
+          <Text style={styles.confirmName}>{student?.name} {student?.surname}</Text>
+          <Text style={styles.confirmReg}>{student?.reg_number}</Text>
+
+          <TouchableOpacity style={[styles.confirmBtn, { backgroundColor: '#534AB7' }]} onPress={confirmPresent}>
+            <Ionicons name="checkmark-circle-outline" size={24} color="#ffffff" />
+            <Text style={styles.confirmBtnText}>Confirm Present</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.cancelBtn} onPress={resetAll}>
+            <Text style={styles.cancelBtnText}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     );
   }
@@ -132,6 +255,13 @@ export default function ScanAttendance() {
         <View style={styles.modeContainer}>
           <Ionicons name="checkmark-circle-outline" size={70} color="#1D9E75" />
           <Text style={styles.modeTitle}>How would you like to mark attendance?</Text>
+
+          <View style={styles.studentInfo}>
+            <Ionicons name="person-circle-outline" size={20} color="#1D9E75" />
+            <Text style={styles.studentInfoText}>
+              {student?.name} {student?.surname} — {student?.reg_number}
+            </Text>
+          </View>
 
           <TouchableOpacity
             style={styles.modeBtn}
@@ -164,7 +294,7 @@ export default function ScanAttendance() {
               </View>
               <View>
                 <Text style={styles.modeBtnTitle}>Enter BLE Code</Text>
-                <Text style={styles.modeBtnSub}>Type the code from your lecturer</Text>
+                <Text style={styles.modeBtnSub}>Type the 4 digit code from lecturer</Text>
               </View>
             </View>
             <Ionicons name="chevron-forward" size={20} color="#a0c4ff" />
@@ -199,17 +329,14 @@ export default function ScanAttendance() {
           ) : (
             <View style={styles.permissionBox}>
               <Ionicons name="camera-outline" size={60} color="#a0c4ff" />
-              <Text style={styles.permissionText}>Camera permission is needed to scan QR codes</Text>
+              <Text style={styles.permissionText}>Camera permission needed to scan QR codes</Text>
               <TouchableOpacity style={styles.permissionBtn} onPress={requestPermission}>
                 <Text style={styles.permissionBtnText}>Allow Camera</Text>
               </TouchableOpacity>
             </View>
           )}
 
-          <TouchableOpacity
-            style={styles.changeModeBtn}
-            onPress={() => setMode('')}
-          >
+          <TouchableOpacity style={styles.changeModeBtn} onPress={() => setMode('')}>
             <Ionicons name="arrow-back" size={18} color="#a0c4ff" />
             <Text style={styles.changeModeText}>Change method</Text>
           </TouchableOpacity>
@@ -235,13 +362,10 @@ export default function ScanAttendance() {
 
           <TouchableOpacity style={styles.submitBtn} onPress={handleBLESubmit}>
             <Ionicons name="checkmark-circle-outline" size={22} color="#ffffff" />
-            <Text style={styles.submitBtnText}>Confirm Attendance</Text>
+            <Text style={styles.submitBtnText}>Verify Code</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.changeModeBtn}
-            onPress={() => setMode('')}
-          >
+          <TouchableOpacity style={styles.changeModeBtn} onPress={() => setMode('')}>
             <Ionicons name="arrow-back" size={18} color="#a0c4ff" />
             <Text style={styles.changeModeText}>Change method</Text>
           </TouchableOpacity>
@@ -259,9 +383,8 @@ const styles = StyleSheet.create({
     padding: 20,
     paddingTop: 60,
   },
-  successContainer: {
+  resultContainer: {
     flex: 1,
-    backgroundColor: '#001f4d',
     alignItems: 'center',
     justifyContent: 'center',
     padding: 24,
@@ -277,8 +400,43 @@ const styles = StyleSheet.create({
     borderColor: '#1D9E75',
     marginBottom: 24,
   },
+  alreadyCircle: {
+    backgroundColor: '#2a2a0e',
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 3,
+    borderColor: '#FFD700',
+    marginBottom: 24,
+  },
+  confirmCircle: {
+    backgroundColor: '#0a3d2e',
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 3,
+    borderColor: '#1D9E75',
+    marginBottom: 20,
+  },
   successTitle: {
-    fontSize: 28,
+    fontSize: 26,
+    fontWeight: 'bold',
+    color: '#ffffff',
+    marginBottom: 8,
+  },
+  alreadyTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#FFD700',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  confirmTitle: {
+    fontSize: 24,
     fontWeight: 'bold',
     color: '#ffffff',
     marginBottom: 8,
@@ -289,10 +447,38 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginBottom: 4,
   },
+  successReg: {
+    fontSize: 14,
+    color: '#a0c4ff',
+    marginBottom: 4,
+  },
   successSub: {
     fontSize: 14,
     color: '#a0c4ff',
     marginBottom: 40,
+  },
+  alreadySub: {
+    fontSize: 14,
+    color: '#a0c4ff',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  confirmSub: {
+    fontSize: 14,
+    color: '#a0c4ff',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  confirmName: {
+    fontSize: 18,
+    color: '#FFD700',
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  confirmReg: {
+    fontSize: 14,
+    color: '#a0c4ff',
+    marginBottom: 24,
   },
   doneBtn: {
     backgroundColor: '#1D9E75',
@@ -306,6 +492,34 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 18,
     fontWeight: 'bold',
+  },
+  confirmBtn: {
+    backgroundColor: '#1D9E75',
+    width: '100%',
+    padding: 18,
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    marginBottom: 12,
+  },
+  confirmBtnText: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  cancelBtn: {
+    width: '100%',
+    padding: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#534AB7',
+  },
+  cancelBtnText: {
+    color: '#a0c4ff',
+    fontSize: 16,
   },
   header: {
     flexDirection: 'row',
@@ -338,8 +552,25 @@ const styles = StyleSheet.create({
     color: '#a0c4ff',
     textAlign: 'center',
     marginTop: 16,
-    marginBottom: 30,
+    marginBottom: 16,
     paddingHorizontal: 20,
+  },
+  studentInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#0a2a4a',
+    borderWidth: 1,
+    borderColor: '#1D9E75',
+    padding: 12,
+    borderRadius: 10,
+    marginBottom: 20,
+    width: '100%',
+  },
+  studentInfoText: {
+    color: '#ffffff',
+    fontSize: 14,
+    flex: 1,
   },
   modeBtn: {
     backgroundColor: '#0a2a4a',

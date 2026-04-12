@@ -13,6 +13,7 @@ export default function StudentLogin() {
   const [program, setProgram] = useState('');
   const [regNumber, setRegNumber] = useState('');
   const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
   const [loginReg, setLoginReg] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -80,8 +81,8 @@ export default function StudentLogin() {
 
   const handleSubmit = async () => {
     if (isSignUp) {
-      if (!name || !surname || !program || !regNumber || !email || !password || !confirmPassword) {
-        Alert.alert('Missing Fields', 'Please fill in all fields');
+      if (!name || !surname || !program || !regNumber || !email || !phone || !password || !confirmPassword) {
+        Alert.alert('Missing Fields', 'Please fill in all fields including phone number');
         return;
       }
       if (!validateRegNumber(regNumber)) {
@@ -92,8 +93,12 @@ export default function StudentLogin() {
         Alert.alert('Invalid Email', 'Email must be in format R2211952R@students.msu.ac.zw');
         return;
       }
+      if (phone.length < 10) {
+        Alert.alert('Invalid Phone', 'Please enter a valid phone number');
+        return;
+      }
       if (!validatePassword(password)) {
-        Alert.alert('Weak Password', 'Password must be at least 8 characters and include uppercase, lowercase, number and special character e.g. Campus@2026');
+        Alert.alert('Weak Password', 'Password must be at least 8 characters with uppercase, lowercase, number and special character e.g. Campus@2026');
         return;
       }
       if (password !== confirmPassword) {
@@ -101,16 +106,21 @@ export default function StudentLogin() {
         return;
       }
 
-      const result = registerStudent(name, surname, program, regNumber, email, password);
+      const result = registerStudent(name, surname, program, regNumber, email, password, phone);
 
       if (result.success) {
-        Alert.alert('Success', 'Account created! You can now log in using your reg number.');
+        Alert.alert(
+          'Account Created!',
+          `Welcome to Campus IQ, ${name}! Your account has been created successfully. You can now log in using your reg number.`,
+          [{ text: 'Login Now' }]
+        );
         setIsSignUp(false);
         setName('');
         setSurname('');
         setProgram('');
         setRegNumber('');
         setEmail('');
+        setPhone('');
         setPassword('');
         setConfirmPassword('');
       } else {
@@ -139,7 +149,7 @@ export default function StudentLogin() {
         await AsyncStorage.setItem('current_student', JSON.stringify(result.student));
         router.push('/student-home');
       } else {
-        Alert.alert('Login Failed', 'Incorrect reg number or password');
+        Alert.alert('Login Failed', 'Incorrect reg number or password. Please check your details and try again.');
       }
     }
   };
@@ -212,6 +222,18 @@ export default function StudentLogin() {
               onChangeText={setEmail}
               keyboardType="email-address"
               autoCapitalize="none"
+            />
+          </View>
+
+          <View style={styles.inputBox}>
+            <Ionicons name="phone-portrait-outline" size={20} color="#1D9E75" style={styles.inputIcon} />
+            <TextInput
+              style={styles.input}
+              placeholder="Phone e.g. 0771234567"
+              placeholderTextColor="#aaa"
+              value={phone}
+              onChangeText={setPhone}
+              keyboardType="phone-pad"
             />
           </View>
         </>

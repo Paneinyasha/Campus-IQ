@@ -1,37 +1,58 @@
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import db from '../database/db';
+
+const AVATARS: any = {
+  1: { icon: 'person-circle', color: '#1D9E75' },
+  2: { icon: 'happy', color: '#534AB7' },
+  3: { icon: 'star', color: '#FFD700' },
+  4: { icon: 'heart', color: '#D85A30' },
+  5: { icon: 'rocket', color: '#a0c4ff' },
+  6: { icon: 'planet', color: '#F0997B' },
+  7: { icon: 'leaf', color: '#5DCAA5' },
+  8: { icon: 'flash', color: '#EF9F27' },
+  9: { icon: 'diamond', color: '#ED93B1' },
+  10: { icon: 'flame', color: '#E24B4A' },
+  11: { icon: 'game-controller', color: '#7F77DD' },
+  12: { icon: 'musical-notes', color: '#1D9E75' },
+};
 
 export default function Chat() {
   const router = useRouter();
   const [messages, setMessages] = useState<any[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [currentUser, setCurrentUser] = useState<any>(null);
+  const [userType, setUserType] = useState('');
   const scrollViewRef = useRef<ScrollView>(null);
 
   useEffect(() => {
-    setupChat();
+    loadCurrentUser();
     loadMessages();
     const interval = setInterval(loadMessages, 3000);
     return () => clearInterval(interval);
   }, []);
 
-  const setupChat = () => {
+  const loadCurrentUser = async () => {
     try {
-      db.execSync(`
-        CREATE TABLE IF NOT EXISTS chat_messages (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          sender_name TEXT NOT NULL,
-          sender_reg TEXT NOT NULL,
-          message TEXT NOT NULL,
-          created_at TEXT DEFAULT CURRENT_TIMESTAMP
-        );
-      `);
-      const student = db.getFirstSync(`SELECT * FROM students LIMIT 1`);
+      const student = await AsyncStorage.getItem('current_student');
       if (student) {
-        setCurrentUser(student);
+        setCurrentUser(JSON.parse(student));
+        setUserType('student');
+        return;
+      }
+      const lecturer = await AsyncStorage.getItem('current_lecturer');
+      if (lecturer) {
+        setCurrentUser(JSON.parse(lecturer));
+        setUserType('lecturer');
+        return;
+      }
+      const admin = await AsyncStorage.getItem('current_admin');
+      if (admin) {
+        setCurrentUser(JSON.parse(admin));
+        setUserType('admin');
       }
     } catch (e) {}
   };
@@ -48,9 +69,15 @@ export default function Chat() {
     } catch (e) {}
   };
 
+  const getSenderId = () => {
+    if (!currentUser) return '';
+    if (userType === 'student') return currentUser.reg_number;
+    if (userType === 'lecturer') return currentUser.email;
+    return 'admin';
+  };
+
   const sendMessage = () => {
     if (!newMessage.trim()) return;
-
     if (!currentUser) {
       Alert.alert('Error', 'You must be logged in to chat');
       return;
@@ -60,20 +87,32 @@ export default function Chat() {
     const containsBadWord = badWords.some(word =>
       newMessage.toLowerCase().includes(word)
     );
-
     if (containsBadWord) {
       Alert.alert('Message Blocked', 'Your message contains inappropriate content');
       return;
     }
 
+    let senderName = '';
+    let senderReg = '';
+    let senderRole = userType;
+    let avatarId = currentUser.avatar_id || 1;
+
+    if (userType === 'student') {
+      senderName = `${currentUser.name} ${currentUser.surname}`;
+      senderReg = currentUser.reg_number;
+    } else if (userType === 'lecturer') {
+      senderName = `${currentUser.name} ${currentUser.surname}`;
+      senderReg = currentUser.email;
+    } else {
+      senderName = 'Campus Admin';
+      senderReg = 'admin';
+    }
+
     try {
       db.runSync(
-        `INSERT INTO chat_messages (sender_name, sender_reg, message) VALUES (?, ?, ?)`,
-        [
-          `${(currentUser as any).name} ${(currentUser as any).surname}`,
-          (currentUser as any).reg_number,
-          newMessage.trim()
-        ]
+        `INSERT INTO chat_messages (sender_name, sender_reg, message, sender_role, avatar_id) 
+         VALUES (?, ?, ?, ?, ?)`,
+        [senderName, senderReg, newMessage.trim(), senderRole, avatarId]
       );
       setNewMessage('');
       loadMessages();
@@ -83,13 +122,15 @@ export default function Chat() {
   };
 
   const deleteMessage = (id: number, senderReg: string) => {
-    if (!currentUser || (currentUser as any).reg_number !== senderReg) {
+    if (!currentUser) return;
+    const myId = getSenderId();
+    if (myId !== senderReg && userType !== 'admin') {
       Alert.alert('Error', 'You can only delete your own messages');
       return;
     }
     Alert.alert(
       'Delete Message',
-      'Are you sure you want to delete this message?',
+      'Are you sure?',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -112,7 +153,23 @@ export default function Chat() {
   };
 
   const isMyMessage = (senderReg: string) => {
-    return currentUser && (currentUser as any).reg_number === senderReg;
+    return getSenderId() === senderReg;
+  };
+
+  const getAvatar = (avatarId: number) => {
+    return AVATARS[avatarId] || AVATARS[1];
+  };
+
+  const getRoleColor = (role: string) => {
+    if (role === 'lecturer') return '#534AB7';
+    if (role === 'admin') return '#D85A30';
+    return '#1D9E75';
+  };
+
+  const getRoleLabel = (role: string) => {
+    if (role === 'lecturer') return 'Lecturer';
+    if (role === 'admin') return 'Admin';
+    return '';
   };
 
   return (
@@ -135,7 +192,7 @@ export default function Chat() {
       <View style={styles.noticeBanner}>
         <Ionicons name="shield-checkmark-outline" size={16} color="#FFD700" />
         <Text style={styles.noticeText}>
-          This is a moderated chat. Be respectful to fellow students.
+          Moderated chat — Be respectful to fellow students
         </Text>
       </View>
 
@@ -152,35 +209,68 @@ export default function Chat() {
             <Text style={styles.emptyText}>Be the first to say something!</Text>
           </View>
         ) : (
-          messages.map((msg: any) => (
-            <TouchableOpacity
-              key={msg.id}
-              style={[
-                styles.messageBubble,
-                isMyMessage(msg.sender_reg) ? styles.myBubble : styles.theirBubble
-              ]}
-              onLongPress={() => deleteMessage(msg.id, msg.sender_reg)}
-            >
-              {!isMyMessage(msg.sender_reg) && (
-                <Text style={styles.senderName}>{msg.sender_name}</Text>
-              )}
-              {!isMyMessage(msg.sender_reg) && (
-                <Text style={styles.senderReg}>{msg.sender_reg}</Text>
-              )}
-              <Text style={[
-                styles.messageText,
-                isMyMessage(msg.sender_reg) && styles.myMessageText
-              ]}>
-                {msg.message}
-              </Text>
-              <Text style={[
-                styles.messageTime,
-                isMyMessage(msg.sender_reg) && styles.myMessageTime
-              ]}>
-                {formatTime(msg.created_at)}
-              </Text>
-            </TouchableOpacity>
-          ))
+          messages.map((msg: any) => {
+            const isMine = isMyMessage(msg.sender_reg);
+            const avatar = getAvatar(msg.avatar_id || 1);
+            const roleColor = getRoleColor(msg.sender_role);
+            const roleLabel = getRoleLabel(msg.sender_role);
+
+            return (
+              <TouchableOpacity
+                key={msg.id}
+                style={[
+                  styles.messageRow,
+                  isMine && styles.messageRowRight
+                ]}
+                onLongPress={() => deleteMessage(msg.id, msg.sender_reg)}
+              >
+                {!isMine && (
+                  <View style={[styles.avatarSmall, { borderColor: avatar.color }]}>
+                    <Ionicons name={avatar.icon} size={18} color={avatar.color} />
+                  </View>
+                )}
+
+                <View style={[
+                  styles.messageBubble,
+                  isMine ? styles.myBubble : styles.theirBubble
+                ]}>
+                  {!isMine && (
+                    <View style={styles.senderRow}>
+                      <Text style={[styles.senderName, { color: roleColor }]}>
+                        {msg.sender_name}
+                      </Text>
+                      {roleLabel !== '' && (
+                        <View style={[styles.rolePill, { backgroundColor: roleColor + '22' }]}>
+                          <Text style={[styles.roleText, { color: roleColor }]}>{roleLabel}</Text>
+                        </View>
+                      )}
+                    </View>
+                  )}
+                  {!isMine && (
+                    <Text style={styles.senderReg}>{msg.sender_reg}</Text>
+                  )}
+                  <Text style={[
+                    styles.messageText,
+                    isMine && styles.myMessageText
+                  ]}>
+                    {msg.message}
+                  </Text>
+                  <Text style={[
+                    styles.messageTime,
+                    isMine && styles.myMessageTime
+                  ]}>
+                    {formatTime(msg.created_at)}
+                  </Text>
+                </View>
+
+                {isMine && (
+                  <View style={[styles.avatarSmall, { borderColor: avatar.color }]}>
+                    <Ionicons name={avatar.icon} size={18} color={avatar.color} />
+                  </View>
+                )}
+              </TouchableOpacity>
+            );
+          })
         )}
       </ScrollView>
 
@@ -260,7 +350,7 @@ const styles = StyleSheet.create({
   },
   messagesContainer: {
     flex: 1,
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
   },
   messagesContent: {
     paddingBottom: 10,
@@ -279,31 +369,59 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#a0c4ff',
   },
+  messageRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 8,
+    marginBottom: 12,
+  },
+  messageRowRight: {
+    justifyContent: 'flex-end',
+  },
+  avatarSmall: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#0a2a4a',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+  },
   messageBubble: {
-    maxWidth: '80%',
+    maxWidth: '75%',
     padding: 12,
     borderRadius: 14,
-    marginBottom: 10,
   },
   myBubble: {
     backgroundColor: '#1a1650',
     borderWidth: 1,
     borderColor: '#534AB7',
-    alignSelf: 'flex-end',
     borderBottomRightRadius: 4,
   },
   theirBubble: {
     backgroundColor: '#0a2a4a',
     borderWidth: 1,
     borderColor: '#1D9E75',
-    alignSelf: 'flex-start',
     borderBottomLeftRadius: 4,
+  },
+  senderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 2,
   },
   senderName: {
     fontSize: 13,
     fontWeight: 'bold',
-    color: '#1D9E75',
-    marginBottom: 2,
+  },
+  rolePill: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  roleText: {
+    fontSize: 10,
+    fontWeight: 'bold',
   },
   senderReg: {
     fontSize: 11,
@@ -322,7 +440,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#7a9cc4',
     marginTop: 4,
-    textAlign: 'left',
   },
   myMessageTime: {
     textAlign: 'right',

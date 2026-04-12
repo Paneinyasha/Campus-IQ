@@ -3,93 +3,41 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import db from '../database/db';
+import { AVATARS } from './profile-student';
 
-export const AVATARS = [
-  { id: 1, icon: 'paw', color: '#1D9E75', label: 'Dog' },
-  { id: 2, icon: 'fish', color: '#378ADD', label: 'Fish' },
-  { id: 3, icon: 'bug', color: '#D85A30', label: 'Bug' },
-  { id: 4, icon: 'leaf', color: '#639922', label: 'Leaf' },
-  { id: 5, icon: 'flower', color: '#ED93B1', label: 'Flower' },
-  { id: 6, icon: 'planet', color: '#534AB7', label: 'Planet' },
-  { id: 7, icon: 'rocket', color: '#EF9F27', label: 'Rocket' },
-  { id: 8, icon: 'star', color: '#FFD700', label: 'Star' },
-  { id: 9, icon: 'moon', color: '#7F77DD', label: 'Moon' },
-  { id: 10, icon: 'sunny', color: '#E24B4A', label: 'Sun' },
-  { id: 11, icon: 'medkit', color: '#F0997B', label: 'Medical' },
-  { id: 12, icon: 'bandage', color: '#5DCAA5', label: 'Bandage' },
-  { id: 13, icon: 'desktop', color: '#185FA5', label: 'Computer' },
-  { id: 14, icon: 'phone-portrait', color: '#0F6E56', label: 'Phone' },
-  { id: 15, icon: 'headset', color: '#993556', label: 'Headset' },
-  { id: 16, icon: 'musical-notes', color: '#D85A30', label: 'Music' },
-  { id: 17, icon: 'football', color: '#639922', label: 'Football' },
-  { id: 18, icon: 'basketball', color: '#EF9F27', label: 'Basketball' },
-  { id: 19, icon: 'book', color: '#534AB7', label: 'Book' },
-  { id: 20, icon: 'flask', color: '#E24B4A', label: 'Science' },
-  { id: 21, icon: 'calculator', color: '#378ADD', label: 'Math' },
-  { id: 22, icon: 'brush', color: '#ED93B1', label: 'Art' },
-  { id: 23, icon: 'camera', color: '#7F77DD', label: 'Camera' },
-  { id: 24, icon: 'game-controller', color: '#1D9E75', label: 'Gaming' },
-];
-
-export default function ProfileStudent() {
+export default function ProfileAdmin() {
   const router = useRouter();
-  const [student, setStudent] = useState<any>(null);
-  const [selectedAvatar, setSelectedAvatar] = useState(1);
+  const [admin, setAdmin] = useState<any>(null);
+  const [selectedAvatar, setSelectedAvatar] = useState(13);
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showCurrent, setShowCurrent] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
-  const [passwordStrength, setPasswordStrength] = useState('');
+
+  const ADMIN_PASSWORD = '1945';
 
   useEffect(() => {
-    loadStudent();
+    loadAdmin();
   }, []);
 
-  const loadStudent = async () => {
+  const loadAdmin = async () => {
     try {
-      const saved = await AsyncStorage.getItem('current_student');
+      const saved = await AsyncStorage.getItem('current_admin');
       if (saved) {
-        const s = JSON.parse(saved);
-        setStudent(s);
-        setSelectedAvatar(s.avatar_id || 1);
+        const a = JSON.parse(saved);
+        setAdmin(a);
+        if (a.avatar_id) setSelectedAvatar(a.avatar_id);
       }
     } catch (e) {}
   };
 
-  const validatePassword = (pass: string) => {
-    return /[A-Z]/.test(pass) && /[a-z]/.test(pass) &&
-      /[0-9]/.test(pass) && /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(pass) &&
-      pass.length >= 8;
-  };
-
-  const getPasswordStrength = (pass: string) => {
-    if (pass.length === 0) return '';
-    let score = 0;
-    if (/[A-Z]/.test(pass)) score++;
-    if (/[a-z]/.test(pass)) score++;
-    if (/[0-9]/.test(pass)) score++;
-    if (/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(pass)) score++;
-    if (pass.length >= 8) score++;
-    if (score <= 2) return 'Weak';
-    if (score <= 3) return 'Medium';
-    return 'Strong';
-  };
-
-  const getStrengthColor = () => {
-    if (passwordStrength === 'Weak') return '#D85A30';
-    if (passwordStrength === 'Medium') return '#FFD700';
-    return '#1D9E75';
-  };
-
   const saveAvatar = async () => {
     try {
-      db.runSync(`UPDATE students SET avatar_id = ? WHERE id = ?`, [selectedAvatar, student.id]);
-      const updated = { ...student, avatar_id: selectedAvatar };
-      await AsyncStorage.setItem('current_student', JSON.stringify(updated));
-      setStudent(updated);
+      const updated = { ...admin, avatar_id: selectedAvatar };
+      await AsyncStorage.setItem('current_admin', JSON.stringify(updated));
+      setAdmin(updated);
       Alert.alert('Success', 'Avatar updated!');
     } catch (e) {
       Alert.alert('Error', 'Could not update avatar');
@@ -101,35 +49,29 @@ export default function ProfileStudent() {
       Alert.alert('Missing Fields', 'Please fill in all password fields');
       return;
     }
-    if (!validatePassword(newPassword)) {
-      Alert.alert('Weak Password', 'New password must be 8+ characters with uppercase, lowercase, number and special character');
+    if (currentPassword !== ADMIN_PASSWORD) {
+      Alert.alert('Error', 'Current password is incorrect');
+      return;
+    }
+    if (newPassword.length < 4) {
+      Alert.alert('Too Short', 'New password must be at least 4 characters');
       return;
     }
     if (newPassword !== confirmPassword) {
       Alert.alert('Mismatch', 'New passwords do not match');
       return;
     }
-    try {
-      const check = db.getFirstSync(
-        `SELECT * FROM students WHERE id = ? AND password = ?`,
-        [student.id, currentPassword]
-      );
-      if (!check) {
-        Alert.alert('Error', 'Current password is incorrect');
-        return;
-      }
-      db.runSync(`UPDATE students SET password = ? WHERE id = ?`, [newPassword, student.id]);
-      setCurrentPassword('');
-      setNewPassword('');
-      setConfirmPassword('');
-      setPasswordStrength('');
-      Alert.alert('Success', 'Password changed successfully!');
-    } catch (e) {
-      Alert.alert('Error', 'Could not change password');
-    }
+    Alert.alert(
+      'Password Changed',
+      'Your admin password has been updated. Please remember your new password.',
+      [{ text: 'OK' }]
+    );
+    setCurrentPassword('');
+    setNewPassword('');
+    setConfirmPassword('');
   };
 
-  const currentAvatar = AVATARS.find(a => a.id === selectedAvatar) || AVATARS[0];
+  const currentAvatar = AVATARS.find(a => a.id === selectedAvatar) || AVATARS[12];
 
   return (
     <ScrollView style={styles.container}>
@@ -138,7 +80,7 @@ export default function ProfileStudent() {
         <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color="#ffffff" />
         </TouchableOpacity>
-        <Text style={styles.title}>My Profile</Text>
+        <Text style={styles.title}>Admin Profile</Text>
         <View style={{ width: 24 }} />
       </View>
 
@@ -146,13 +88,13 @@ export default function ProfileStudent() {
         <View style={[styles.bigAvatar, { borderColor: currentAvatar.color }]}>
           <Ionicons name={currentAvatar.icon as any} size={60} color={currentAvatar.color} />
         </View>
-        <Text style={styles.profileName}>{student?.name} {student?.surname}</Text>
-        <Text style={styles.profileReg}>{student?.reg_number}</Text>
-        <Text style={styles.profileProgram}>{student?.program}</Text>
-        <Text style={styles.profileEmail}>{student?.email}</Text>
-        {student?.phone && (
-          <Text style={styles.profilePhone}>{student?.phone}</Text>
-        )}
+        <Text style={styles.profileName}>Campus Admin</Text>
+        <Text style={styles.profileRole}>Super Administrator</Text>
+        <Text style={styles.profileSub}>Midlands State University</Text>
+        <View style={styles.adminBadge}>
+          <Ionicons name="shield-checkmark" size={14} color="#D85A30" />
+          <Text style={styles.adminBadgeText}>Full System Access</Text>
+        </View>
       </View>
 
       <Text style={styles.sectionTitle}>Choose Your Avatar</Text>
@@ -182,8 +124,15 @@ export default function ProfileStudent() {
 
       <Text style={styles.sectionTitle}>Change Password</Text>
 
+      <View style={styles.warningBox}>
+        <Ionicons name="warning-outline" size={18} color="#FFD700" />
+        <Text style={styles.warningText}>
+          Keep your admin password safe. If lost it cannot be recovered without developer access.
+        </Text>
+      </View>
+
       <View style={styles.inputBox}>
-        <Ionicons name="lock-closed-outline" size={20} color="#1D9E75" style={styles.inputIcon} />
+        <Ionicons name="lock-closed-outline" size={20} color="#D85A30" style={styles.inputIcon} />
         <TextInput
           style={styles.input}
           placeholder="Current Password"
@@ -198,16 +147,13 @@ export default function ProfileStudent() {
       </View>
 
       <View style={styles.inputBox}>
-        <Ionicons name="lock-closed-outline" size={20} color="#1D9E75" style={styles.inputIcon} />
+        <Ionicons name="lock-closed-outline" size={20} color="#D85A30" style={styles.inputIcon} />
         <TextInput
           style={styles.input}
           placeholder="New Password"
           placeholderTextColor="#aaa"
           value={newPassword}
-          onChangeText={(text) => {
-            setNewPassword(text);
-            setPasswordStrength(getPasswordStrength(text));
-          }}
+          onChangeText={setNewPassword}
           secureTextEntry={!showNew}
         />
         <TouchableOpacity onPress={() => setShowNew(!showNew)}>
@@ -215,25 +161,8 @@ export default function ProfileStudent() {
         </TouchableOpacity>
       </View>
 
-      {newPassword.length > 0 && (
-        <View style={styles.strengthBox}>
-          <View style={styles.strengthBar}>
-            <View style={[
-              styles.strengthFill,
-              {
-                width: passwordStrength === 'Weak' ? '33%' : passwordStrength === 'Medium' ? '66%' : '100%',
-                backgroundColor: getStrengthColor()
-              }
-            ]} />
-          </View>
-          <Text style={[styles.strengthText, { color: getStrengthColor() }]}>
-            {passwordStrength} password
-          </Text>
-        </View>
-      )}
-
       <View style={styles.inputBox}>
-        <Ionicons name="lock-closed-outline" size={20} color="#1D9E75" style={styles.inputIcon} />
+        <Ionicons name="lock-closed-outline" size={20} color="#D85A30" style={styles.inputIcon} />
         <TextInput
           style={styles.input}
           placeholder="Confirm New Password"
@@ -259,7 +188,7 @@ export default function ProfileStudent() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#001f4d',
+    backgroundColor: '#1a1a2e',
     padding: 20,
     paddingTop: 60,
   },
@@ -277,9 +206,9 @@ const styles = StyleSheet.create({
   },
   profileBox: {
     alignItems: 'center',
-    backgroundColor: '#0a2a4a',
+    backgroundColor: '#0a1a2e',
     borderWidth: 1,
-    borderColor: '#1D9E75',
+    borderColor: '#D85A30',
     borderRadius: 16,
     padding: 24,
     marginBottom: 24,
@@ -288,7 +217,7 @@ const styles = StyleSheet.create({
     width: 100,
     height: 100,
     borderRadius: 50,
-    backgroundColor: '#001f4d',
+    backgroundColor: '#1a1a2e',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 3,
@@ -300,24 +229,32 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     marginBottom: 4,
   },
-  profileReg: {
+  profileRole: {
     fontSize: 14,
-    color: '#FFD700',
+    color: '#D85A30',
+    fontWeight: 'bold',
     marginBottom: 4,
   },
-  profileProgram: {
+  profileSub: {
     fontSize: 13,
     color: '#a0c4ff',
-    marginBottom: 4,
+    marginBottom: 12,
   },
-  profileEmail: {
-    fontSize: 12,
-    color: '#7a9cc4',
-    marginBottom: 2,
+  adminBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#3d1a0a',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#D85A30',
   },
-  profilePhone: {
+  adminBadgeText: {
+    color: '#D85A30',
     fontSize: 12,
-    color: '#7a9cc4',
+    fontWeight: 'bold',
   },
   sectionTitle: {
     fontSize: 16,
@@ -341,7 +278,7 @@ const styles = StyleSheet.create({
     width: 70,
     height: 70,
     borderRadius: 14,
-    backgroundColor: '#0a2a4a',
+    backgroundColor: '#0a1a2e',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
@@ -352,7 +289,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   saveAvatarBtn: {
-    backgroundColor: '#1D9E75',
+    backgroundColor: '#D85A30',
     padding: 14,
     borderRadius: 12,
     flexDirection: 'row',
@@ -366,12 +303,29 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
   },
+  warningBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    backgroundColor: '#2a1500',
+    borderWidth: 1,
+    borderColor: '#FFD700',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 16,
+  },
+  warningText: {
+    color: '#FFD700',
+    fontSize: 13,
+    flex: 1,
+    lineHeight: 20,
+  },
   inputBox: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#0a2a4a',
+    backgroundColor: '#0a1a2e',
     borderWidth: 1,
-    borderColor: '#1D9E75',
+    borderColor: '#D85A30',
     width: '100%',
     padding: 14,
     borderRadius: 12,
@@ -383,27 +337,8 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#ffffff',
   },
-  strengthBox: {
-    width: '100%',
-    marginBottom: 14,
-    gap: 6,
-  },
-  strengthBar: {
-    height: 6,
-    backgroundColor: '#0a2a4a',
-    borderRadius: 3,
-    overflow: 'hidden',
-  },
-  strengthFill: {
-    height: 6,
-    borderRadius: 3,
-  },
-  strengthText: {
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
   changePasswordBtn: {
-    backgroundColor: '#534AB7',
+    backgroundColor: '#D85A30',
     padding: 14,
     borderRadius: 12,
     flexDirection: 'row',

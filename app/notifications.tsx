@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -7,26 +8,29 @@ import db from '../database/db';
 export default function Notifications() {
   const router = useRouter();
   const [notifications, setNotifications] = useState<any[]>([]);
+  const [userType, setUserType] = useState('');
 
   useEffect(() => {
+    loadUserType();
     setupNotifications();
     loadNotifications();
+    const interval = setInterval(loadNotifications, 5000);
+    return () => clearInterval(interval);
   }, []);
+
+  const loadUserType = async () => {
+    try {
+      const student = await AsyncStorage.getItem('current_student');
+      if (student) { setUserType('student'); return; }
+      const lecturer = await AsyncStorage.getItem('current_lecturer');
+      if (lecturer) { setUserType('lecturer'); return; }
+      const admin = await AsyncStorage.getItem('current_admin');
+      if (admin) { setUserType('admin'); }
+    } catch (e) {}
+  };
 
   const setupNotifications = () => {
     try {
-      db.execSync(`
-        CREATE TABLE IF NOT EXISTS notifications (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          title TEXT NOT NULL,
-          message TEXT NOT NULL,
-          target TEXT NOT NULL,
-          type TEXT DEFAULT 'general',
-          is_read INTEGER DEFAULT 0,
-          created_at TEXT DEFAULT CURRENT_TIMESTAMP
-        );
-      `);
-
       const existing = db.getAllSync(`SELECT * FROM notifications`);
       if (existing.length === 0) {
         db.execSync(`
@@ -130,13 +134,18 @@ export default function Notifications() {
         )}
       </View>
 
+      <View style={styles.infoBanner}>
+        <Ionicons name="information-circle-outline" size={16} color="#a0c4ff" />
+        <Text style={styles.infoText}>
+          Notifications refresh every 5 seconds. New broadcasts appear automatically.
+        </Text>
+      </View>
+
       {notifications.length === 0 ? (
         <View style={styles.emptyBox}>
           <Ionicons name="notifications-off-outline" size={60} color="#534AB7" />
           <Text style={styles.emptyTitle}>No Notifications</Text>
-          <Text style={styles.emptyText}>
-            You are all caught up!
-          </Text>
+          <Text style={styles.emptyText}>You are all caught up!</Text>
         </View>
       ) : (
         notifications.map((notif: any) => (
@@ -212,7 +221,7 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: 16,
   },
   backBtn: {
     padding: 4,
@@ -246,6 +255,22 @@ const styles = StyleSheet.create({
     color: '#a0c4ff',
     fontSize: 13,
     textDecorationLine: 'underline',
+  },
+  infoBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#0a2a4a',
+    borderWidth: 1,
+    borderColor: '#534AB7',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 16,
+  },
+  infoText: {
+    color: '#a0c4ff',
+    fontSize: 12,
+    flex: 1,
   },
   emptyBox: {
     alignItems: 'center',

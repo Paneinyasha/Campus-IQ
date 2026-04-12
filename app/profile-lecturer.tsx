@@ -4,37 +4,11 @@ import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import db from '../database/db';
+import { AVATARS } from './profile-student';
 
-export const AVATARS = [
-  { id: 1, icon: 'paw', color: '#1D9E75', label: 'Dog' },
-  { id: 2, icon: 'fish', color: '#378ADD', label: 'Fish' },
-  { id: 3, icon: 'bug', color: '#D85A30', label: 'Bug' },
-  { id: 4, icon: 'leaf', color: '#639922', label: 'Leaf' },
-  { id: 5, icon: 'flower', color: '#ED93B1', label: 'Flower' },
-  { id: 6, icon: 'planet', color: '#534AB7', label: 'Planet' },
-  { id: 7, icon: 'rocket', color: '#EF9F27', label: 'Rocket' },
-  { id: 8, icon: 'star', color: '#FFD700', label: 'Star' },
-  { id: 9, icon: 'moon', color: '#7F77DD', label: 'Moon' },
-  { id: 10, icon: 'sunny', color: '#E24B4A', label: 'Sun' },
-  { id: 11, icon: 'medkit', color: '#F0997B', label: 'Medical' },
-  { id: 12, icon: 'bandage', color: '#5DCAA5', label: 'Bandage' },
-  { id: 13, icon: 'desktop', color: '#185FA5', label: 'Computer' },
-  { id: 14, icon: 'phone-portrait', color: '#0F6E56', label: 'Phone' },
-  { id: 15, icon: 'headset', color: '#993556', label: 'Headset' },
-  { id: 16, icon: 'musical-notes', color: '#D85A30', label: 'Music' },
-  { id: 17, icon: 'football', color: '#639922', label: 'Football' },
-  { id: 18, icon: 'basketball', color: '#EF9F27', label: 'Basketball' },
-  { id: 19, icon: 'book', color: '#534AB7', label: 'Book' },
-  { id: 20, icon: 'flask', color: '#E24B4A', label: 'Science' },
-  { id: 21, icon: 'calculator', color: '#378ADD', label: 'Math' },
-  { id: 22, icon: 'brush', color: '#ED93B1', label: 'Art' },
-  { id: 23, icon: 'camera', color: '#7F77DD', label: 'Camera' },
-  { id: 24, icon: 'game-controller', color: '#1D9E75', label: 'Gaming' },
-];
-
-export default function ProfileStudent() {
+export default function ProfileLecturer() {
   const router = useRouter();
-  const [student, setStudent] = useState<any>(null);
+  const [lecturer, setLecturer] = useState<any>(null);
   const [selectedAvatar, setSelectedAvatar] = useState(1);
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -45,16 +19,16 @@ export default function ProfileStudent() {
   const [passwordStrength, setPasswordStrength] = useState('');
 
   useEffect(() => {
-    loadStudent();
+    loadLecturer();
   }, []);
 
-  const loadStudent = async () => {
+  const loadLecturer = async () => {
     try {
-      const saved = await AsyncStorage.getItem('current_student');
+      const saved = await AsyncStorage.getItem('current_lecturer');
       if (saved) {
-        const s = JSON.parse(saved);
-        setStudent(s);
-        setSelectedAvatar(s.avatar_id || 1);
+        const l = JSON.parse(saved);
+        setLecturer(l);
+        setSelectedAvatar(l.avatar_id || 1);
       }
     } catch (e) {}
   };
@@ -86,10 +60,10 @@ export default function ProfileStudent() {
 
   const saveAvatar = async () => {
     try {
-      db.runSync(`UPDATE students SET avatar_id = ? WHERE id = ?`, [selectedAvatar, student.id]);
-      const updated = { ...student, avatar_id: selectedAvatar };
-      await AsyncStorage.setItem('current_student', JSON.stringify(updated));
-      setStudent(updated);
+      db.runSync(`UPDATE lecturers SET avatar_id = ? WHERE id = ?`, [selectedAvatar, lecturer.id]);
+      const updated = { ...lecturer, avatar_id: selectedAvatar };
+      await AsyncStorage.setItem('current_lecturer', JSON.stringify(updated));
+      setLecturer(updated);
       Alert.alert('Success', 'Avatar updated!');
     } catch (e) {
       Alert.alert('Error', 'Could not update avatar');
@@ -111,14 +85,16 @@ export default function ProfileStudent() {
     }
     try {
       const check = db.getFirstSync(
-        `SELECT * FROM students WHERE id = ? AND password = ?`,
-        [student.id, currentPassword]
+        `SELECT * FROM lecturers WHERE id = ? AND password = ?`,
+        [lecturer.id, currentPassword]
       );
       if (!check) {
         Alert.alert('Error', 'Current password is incorrect');
         return;
       }
-      db.runSync(`UPDATE students SET password = ? WHERE id = ?`, [newPassword, student.id]);
+      db.runSync(`UPDATE lecturers SET password = ?, must_change_password = 0 WHERE id = ?`, [newPassword, lecturer.id]);
+      const updated = { ...lecturer, must_change_password: 0 };
+      await AsyncStorage.setItem('current_lecturer', JSON.stringify(updated));
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
@@ -146,12 +122,11 @@ export default function ProfileStudent() {
         <View style={[styles.bigAvatar, { borderColor: currentAvatar.color }]}>
           <Ionicons name={currentAvatar.icon as any} size={60} color={currentAvatar.color} />
         </View>
-        <Text style={styles.profileName}>{student?.name} {student?.surname}</Text>
-        <Text style={styles.profileReg}>{student?.reg_number}</Text>
-        <Text style={styles.profileProgram}>{student?.program}</Text>
-        <Text style={styles.profileEmail}>{student?.email}</Text>
-        {student?.phone && (
-          <Text style={styles.profilePhone}>{student?.phone}</Text>
+        <Text style={styles.profileName}>{lecturer?.name} {lecturer?.surname}</Text>
+        <Text style={styles.profileDept}>{lecturer?.department}</Text>
+        <Text style={styles.profileEmail}>{lecturer?.email}</Text>
+        {lecturer?.phone && (
+          <Text style={styles.profilePhone}>{lecturer?.phone}</Text>
         )}
       </View>
 
@@ -183,7 +158,7 @@ export default function ProfileStudent() {
       <Text style={styles.sectionTitle}>Change Password</Text>
 
       <View style={styles.inputBox}>
-        <Ionicons name="lock-closed-outline" size={20} color="#1D9E75" style={styles.inputIcon} />
+        <Ionicons name="lock-closed-outline" size={20} color="#534AB7" style={styles.inputIcon} />
         <TextInput
           style={styles.input}
           placeholder="Current Password"
@@ -198,7 +173,7 @@ export default function ProfileStudent() {
       </View>
 
       <View style={styles.inputBox}>
-        <Ionicons name="lock-closed-outline" size={20} color="#1D9E75" style={styles.inputIcon} />
+        <Ionicons name="lock-closed-outline" size={20} color="#534AB7" style={styles.inputIcon} />
         <TextInput
           style={styles.input}
           placeholder="New Password"
@@ -233,7 +208,7 @@ export default function ProfileStudent() {
       )}
 
       <View style={styles.inputBox}>
-        <Ionicons name="lock-closed-outline" size={20} color="#1D9E75" style={styles.inputIcon} />
+        <Ionicons name="lock-closed-outline" size={20} color="#534AB7" style={styles.inputIcon} />
         <TextInput
           style={styles.input}
           placeholder="Confirm New Password"
@@ -279,7 +254,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#0a2a4a',
     borderWidth: 1,
-    borderColor: '#1D9E75',
+    borderColor: '#534AB7',
     borderRadius: 16,
     padding: 24,
     marginBottom: 24,
@@ -300,12 +275,7 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     marginBottom: 4,
   },
-  profileReg: {
-    fontSize: 14,
-    color: '#FFD700',
-    marginBottom: 4,
-  },
-  profileProgram: {
+  profileDept: {
     fontSize: 13,
     color: '#a0c4ff',
     marginBottom: 4,
@@ -352,7 +322,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   saveAvatarBtn: {
-    backgroundColor: '#1D9E75',
+    backgroundColor: '#534AB7',
     padding: 14,
     borderRadius: 12,
     flexDirection: 'row',
@@ -371,7 +341,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#0a2a4a',
     borderWidth: 1,
-    borderColor: '#1D9E75',
+    borderColor: '#534AB7',
     width: '100%',
     padding: 14,
     borderRadius: 12,
@@ -403,7 +373,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   changePasswordBtn: {
-    backgroundColor: '#534AB7',
+    backgroundColor: '#1D9E75',
     padding: 14,
     borderRadius: 12,
     flexDirection: 'row',

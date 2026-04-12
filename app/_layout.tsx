@@ -36,6 +36,15 @@ export default function RootLayout() {
         <Stack.Screen name="quiz-set" options={{ headerShown: false }} />
         <Stack.Screen name="chat" options={{ headerShown: false }} />
         <Stack.Screen name="notifications" options={{ headerShown: false }} />
+        <Stack.Screen name="profile-student" options={{ headerShown: false }} />
+        <Stack.Screen name="profile-lecturer" options={{ headerShown: false }} />
+        <Stack.Screen name="profile-admin" options={{ headerShown: false }} />
+        <Stack.Screen name="broadcast" options={{ headerShown: false }} />
+        <Stack.Screen name="analytics" options={{ headerShown: false }} />
+        <Stack.Screen name="app-settings" options={{ headerShown: false }} />
+        <Stack.Screen name="suspend-user" options={{ headerShown: false }} />
+        <Stack.Screen name="quiz-results" options={{ headerShown: false }} />
+        <Stack.Screen name="create-quiz" options={{ headerShown: false }} />
       </Stack>
       <StatusBar style="light" />
     </>
