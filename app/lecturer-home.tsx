@@ -181,6 +181,26 @@ export default function LecturerHome() {
         </TouchableOpacity>
       </View>
 
+      <View style={styles.row}>
+        <TouchableOpacity
+          style={[styles.card, styles.dark]}
+          onPress={() => router.push('/msu-radio')}
+        >
+          <Ionicons name="radio-outline" size={30} color="#FFD700" />
+          <Text style={styles.cardTitle}>MSU Radio</Text>
+          <Text style={styles.cardSub}>Listen live</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.card, styles.dark]}
+          onPress={() => router.push('/notifications')}
+        >
+          <Ionicons name="notifications-outline" size={30} color="#FFD700" />
+          <Text style={styles.cardTitle}>Notifications</Text>
+          <Text style={styles.cardSub}>Updates</Text>
+        </TouchableOpacity>
+      </View>
+
       <TouchableOpacity
         style={styles.logoutBtn}
         onPress={handleLogout}

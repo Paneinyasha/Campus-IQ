@@ -1,12 +1,11 @@
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
-import { initDatabase } from '../database/db';
 
 export default function RootLayout() {
 
   useEffect(() => {
-    initDatabase();
+    console.log('Campus IQ connected to Supabase');
   }, []);
 
   return (
@@ -45,6 +44,10 @@ export default function RootLayout() {
         <Stack.Screen name="suspend-user" options={{ headerShown: false }} />
         <Stack.Screen name="quiz-results" options={{ headerShown: false }} />
         <Stack.Screen name="create-quiz" options={{ headerShown: false }} />
+        <Stack.Screen name="lecturer-change-password" options={{ headerShown: false }} />
+        <Stack.Screen name="forgot-password" options={{ headerShown: false }} />
+        <Stack.Screen name="manage-student" options={{ headerShown: false }} />
+        <Stack.Screen name="manage-lecturer" options={{ headerShown: false }} />
       </Stack>
       <StatusBar style="light" />
     </>
