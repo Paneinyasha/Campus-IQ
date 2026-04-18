@@ -3,51 +3,47 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 
 export default function RootLayout() {
-
   useEffect(() => {
-    console.log('Campus IQ connected to Supabase');
+    console.log('Campus IQ Initialized');
   }, []);
-
   return (
     <>
-      <Stack>
-        <Stack.Screen name="index" options={{ headerShown: false }} />
-        <Stack.Screen name="login-student" options={{ headerShown: false }} />
-        <Stack.Screen name="login-lecturer" options={{ headerShown: false }} />
-        <Stack.Screen name="login-admin" options={{ headerShown: false }} />
-        <Stack.Screen name="student-home" options={{ headerShown: false }} />
-        <Stack.Screen name="lecturer-home" options={{ headerShown: false }} />
-        <Stack.Screen name="admin-home" options={{ headerShown: false }} />
-        <Stack.Screen name="add-lecturer" options={{ headerShown: false }} />
-        <Stack.Screen name="all-lecturers" options={{ headerShown: false }} />
-        <Stack.Screen name="all-students" options={{ headerShown: false }} />
-        <Stack.Screen name="manage-timetable" options={{ headerShown: false }} />
-        <Stack.Screen name="manage-venues" options={{ headerShown: false }} />
-        <Stack.Screen name="generate-qr" options={{ headerShown: false }} />
-        <Stack.Screen name="scan-attendance" options={{ headerShown: false }} />
-        <Stack.Screen name="my-notes" options={{ headerShown: false }} />
-        <Stack.Screen name="plan-my-day" options={{ headerShown: false }} />
-        <Stack.Screen name="quiz-msu" options={{ headerShown: false }} />
-        <Stack.Screen name="quiz-didyouknow" options={{ headerShown: false }} />
-        <Stack.Screen name="msu-radio" options={{ headerShown: false }} />
-        <Stack.Screen name="campus-map" options={{ headerShown: false }} />
-        <Stack.Screen name="quiz-program" options={{ headerShown: false }} />
-        <Stack.Screen name="quiz-set" options={{ headerShown: false }} />
-        <Stack.Screen name="chat" options={{ headerShown: false }} />
-        <Stack.Screen name="notifications" options={{ headerShown: false }} />
-        <Stack.Screen name="profile-student" options={{ headerShown: false }} />
-        <Stack.Screen name="profile-lecturer" options={{ headerShown: false }} />
-        <Stack.Screen name="profile-admin" options={{ headerShown: false }} />
-        <Stack.Screen name="broadcast" options={{ headerShown: false }} />
-        <Stack.Screen name="analytics" options={{ headerShown: false }} />
-        <Stack.Screen name="app-settings" options={{ headerShown: false }} />
-        <Stack.Screen name="suspend-user" options={{ headerShown: false }} />
-        <Stack.Screen name="quiz-results" options={{ headerShown: false }} />
-        <Stack.Screen name="create-quiz" options={{ headerShown: false }} />
-        <Stack.Screen name="lecturer-change-password" options={{ headerShown: false }} />
-        <Stack.Screen name="forgot-password" options={{ headerShown: false }} />
-        <Stack.Screen name="manage-student" options={{ headerShown: false }} />
-        <Stack.Screen name="manage-lecturer" options={{ headerShown: false }} />
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="index" />
+        <Stack.Screen name="login-student" />
+        <Stack.Screen name="login-lecturer" />
+        <Stack.Screen name="login-admin" />
+        <Stack.Screen name="student-home" />
+        <Stack.Screen name="lecturer-home" />
+        <Stack.Screen name="admin-home" />
+        <Stack.Screen name="add-lecturer" />
+        <Stack.Screen name="all-lecturers" />
+        <Stack.Screen name="all-students" />
+        <Stack.Screen name="manage-timetable" />
+        <Stack.Screen name="manage-venues" />
+        <Stack.Screen name="generate-qr" />
+        <Stack.Screen name="scan-attendance" />
+        <Stack.Screen name="my-notes" />
+        <Stack.Screen name="plan-my-day" />
+        <Stack.Screen name="quiz-msu" />
+        <Stack.Screen name="quiz-didyouknow" />
+        <Stack.Screen name="msu-radio" />
+        <Stack.Screen name="campus-map" />
+        <Stack.Screen name="quiz-program" />
+        <Stack.Screen name="quiz-set" />
+        <Stack.Screen name="chat" />
+        <Stack.Screen name="notifications" />
+        <Stack.Screen name="profile-student" />
+        <Stack.Screen name="profile-lecturer" />
+        <Stack.Screen name="profile-admin" />
+        <Stack.Screen name="broadcast" />
+        <Stack.Screen name="analytics" />
+        <Stack.Screen name="app-settings" />
+        <Stack.Screen name="suspend-user" />
+        <Stack.Screen name="quiz-results" />
+        <Stack.Screen name="create-quiz" />
+        <Stack.Screen name="lecturer-change-password" />
+        <Stack.Screen name="forgot-password" />
       </Stack>
       <StatusBar style="light" />
     </>

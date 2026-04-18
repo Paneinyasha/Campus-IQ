@@ -5,7 +5,7 @@ import * as Sharing from 'expo-sharing';
 import { useEffect, useRef, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
-import { supabase } from '../supabase';
+import { supabase } from '../database/supabase';
 
 export default function GenerateQR() {
   const router = useRouter();

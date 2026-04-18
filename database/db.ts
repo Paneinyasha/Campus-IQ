@@ -1,4 +1,5 @@
-import { supabase } from '../supabase';
+import { supabase } from './supabase';
+
 
 export const initDatabase = async () => {
   console.log('Campus IQ connected to Supabase');

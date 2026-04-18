@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { supabase } from '../supabase';
+import { supabase } from '../database/supabase';
 
 const AVATARS: any = {
   1: { icon: 'paw', color: '#1D9E75' }, 2: { icon: 'fish', color: '#378ADD' },
