@@ -3,11 +3,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { loginStudent, registerStudent } from '../database/db';
+import { loginStudent, registerStudent, resendStudentOTP, verifyStudentOTP } from '../database/db';
 
 export default function StudentLogin() {
   const router = useRouter();
   const [isSignUp, setIsSignUp] = useState(false);
+  const [isOTPScreen, setIsOTPScreen] = useState(false);
+  const [pendingEmail, setPendingEmail] = useState('');
+  const [otpCode, setOtpCode] = useState('');
   const [name, setName] = useState('');
   const [surname, setSurname] = useState('');
   const [program, setProgram] = useState('');
@@ -29,16 +32,34 @@ export default function StudentLogin() {
     try {
       const saved = await AsyncStorage.getItem('student_remember');
       if (saved) {
-        const { reg, password } = JSON.parse(saved);
-        setLoginReg(reg);
-        setPassword(password);
-        setRememberMe(true);
+        const parsed = JSON.parse(saved);
+        // Only pre-fill if remember me was explicitly saved
+        if (parsed.rememberMe) {
+          setLoginReg(parsed.reg);
+          setPassword(parsed.password);
+          setRememberMe(true);
+        }
       }
     } catch (e) {}
   };
 
-  const validateRegNumber = (reg: string) => /^R\d{7}R$/.test(reg);
-  const validateEmail = (em: string) => em.endsWith('@students.msu.ac.zw') && em.startsWith('R');
+  // Auto-generate email from reg number
+  const handleRegNumberChange = (text: string) => {
+    const upper = text.toUpperCase();
+    setRegNumber(upper);
+    if (upper.length >= 2) {
+      setEmail(`${upper.toLowerCase()}@students.msu.ac.zw`);
+    } else {
+      setEmail('');
+    }
+  };
+
+  // Reg number: starts with R, ends with a letter A-Z, has 4+ digits in between
+  const validateRegNumber = (reg: string) => /^R\d{4,}[A-Z]$/.test(reg);
+
+  // Email must match pattern derived from reg number
+  const validateEmail = (em: string) => /^r\d{4,}[a-z]@students\.msu\.ac\.zw$/.test(em);
+
   const validatePassword = (pass: string) => {
     return /[A-Z]/.test(pass) && /[a-z]/.test(pass) &&
       /[0-9]/.test(pass) && /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(pass) &&
@@ -64,6 +85,41 @@ export default function StudentLogin() {
     return '#1D9E75';
   };
 
+  const handleVerifyOTP = async () => {
+    if (loading) return;
+    if (!otpCode || otpCode.length !== 6) {
+      Alert.alert('Invalid OTP', 'Please enter the 6-digit code sent to your email');
+      return;
+    }
+    setLoading(true);
+    try {
+      const result = await verifyStudentOTP(pendingEmail, otpCode);
+      if (result.success) {
+        Alert.alert('Email Verified!', 'Your account is now active. You can log in.', [
+          { text: 'Login Now', onPress: () => { setIsOTPScreen(false); setIsSignUp(false); setOtpCode(''); } }
+        ]);
+      } else {
+        Alert.alert('Verification Failed', result.error || 'Invalid or expired OTP');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResendOTP = async () => {
+    setLoading(true);
+    try {
+      const result = await resendStudentOTP(pendingEmail);
+      if (result.success) {
+        Alert.alert('OTP Sent', 'A new verification code has been sent to your email');
+      } else {
+        Alert.alert('Error', result.error || 'Could not resend OTP');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSubmit = async () => {
     if (loading) return;
     setLoading(true);
@@ -73,10 +129,10 @@ export default function StudentLogin() {
           Alert.alert('Missing Fields', 'Please fill in all fields'); return;
         }
         if (!validateRegNumber(regNumber)) {
-          Alert.alert('Invalid Reg Number', 'Format must be R2211952R'); return;
+          Alert.alert('Invalid Reg Number', 'Format must start with R, have 4+ digits, and end with a letter e.g. R2211952R or R22119A'); return;
         }
         if (!validateEmail(email)) {
-          Alert.alert('Invalid Email', 'Must be R2211952R@students.msu.ac.zw'); return;
+          Alert.alert('Invalid Email', 'Email must match your reg number e.g. r2211952r@students.msu.ac.zw'); return;
         }
         if (phone.length < 10) {
           Alert.alert('Invalid Phone', 'Please enter a valid phone number'); return;
@@ -87,33 +143,39 @@ export default function StudentLogin() {
         if (password !== confirmPassword) {
           Alert.alert('Mismatch', 'Passwords do not match'); return;
         }
-        const result = await registerStudent(name, surname, program, regNumber, email, password, phone);
+        const result = await registerStudent(name, surname, program, regNumber, email.toLowerCase(), password, phone);
         if (result.success) {
-          Alert.alert('Account Created!', `Welcome ${name}! You can now log in with your reg number.`);
-          setIsSignUp(false);
+          setPendingEmail(email.toLowerCase());
+          setIsOTPScreen(true);
           setName(''); setSurname(''); setProgram('');
           setRegNumber(''); setEmail(''); setPhone('');
           setPassword(''); setConfirmPassword('');
+          Alert.alert('Check Your Email!', `A 6-digit verification code has been sent to ${email.toLowerCase()}. It expires in 10 minutes.`);
         } else {
-          Alert.alert('Error', 'This email or reg number already exists');
+          Alert.alert('Error', result.error || 'This email or reg number already exists');
         }
       } else {
         if (!loginReg || !password) {
           Alert.alert('Error', 'Please enter your reg number and password'); return;
         }
-        if (!validateRegNumber(loginReg)) {
+        if (!validateRegNumber(loginReg.toUpperCase())) {
           Alert.alert('Invalid', 'Please enter a valid reg number e.g. R2211952R'); return;
         }
-        const emailToUse = `${loginReg}@students.msu.ac.zw`;
+        const emailToUse = `${loginReg.toLowerCase()}@students.msu.ac.zw`;
         const result = await loginStudent(emailToUse, password);
         if (result.success) {
           if (rememberMe) {
-            await AsyncStorage.setItem('student_remember', JSON.stringify({ reg: loginReg, password }));
+            await AsyncStorage.setItem('student_remember', JSON.stringify({ reg: loginReg, password, rememberMe: true }));
           } else {
             await AsyncStorage.removeItem('student_remember');
           }
           await AsyncStorage.setItem('current_student', JSON.stringify(result.student));
           router.push('/student-home');
+        } else if (result.error === 'unverified') {
+          setPendingEmail(result.email || emailToUse);
+          setIsOTPScreen(true);
+          Alert.alert('Not Verified', 'Your email is not verified. We have sent a new OTP to your email.');
+          await resendStudentOTP(result.email || emailToUse);
         } else {
           Alert.alert('Login Failed', 'Incorrect reg number or password');
         }
@@ -122,6 +184,53 @@ export default function StudentLogin() {
       setLoading(false);
     }
   };
+
+  // OTP Verification Screen
+  if (isOTPScreen) {
+    return (
+      <ScrollView contentContainerStyle={styles.container}>
+        <View style={styles.header}>
+          <Ionicons name="mail-open" size={70} color="#1D9E75" />
+          <Text style={styles.title}>Verify Your Email</Text>
+          <Text style={styles.subtitle}>Enter the 6-digit code sent to</Text>
+          <Text style={[styles.subtitle, { color: '#FFD700', fontWeight: 'bold' }]}>{pendingEmail}</Text>
+        </View>
+
+        <View style={styles.inputBox}>
+          <Ionicons name="key-outline" size={20} color="#1D9E75" style={styles.inputIcon} />
+          <TextInput
+            style={[styles.input, { letterSpacing: 8, fontSize: 22, fontWeight: 'bold' }]}
+            placeholder="000000"
+            placeholderTextColor="#aaa"
+            value={otpCode}
+            onChangeText={setOtpCode}
+            keyboardType="number-pad"
+            maxLength={6}
+          />
+        </View>
+
+        <TouchableOpacity
+          style={[styles.btn, loading && { opacity: 0.6 }]}
+          onPress={handleVerifyOTP}
+          disabled={loading}
+        >
+          <Text style={styles.btnText}>{loading ? 'Verifying...' : 'Verify Email'}</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity onPress={handleResendOTP} disabled={loading}>
+          <Text style={styles.switchText}>Didn't get the code? Resend OTP</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.backBtn}
+          onPress={() => { setIsOTPScreen(false); setOtpCode(''); }}
+        >
+          <Ionicons name="arrow-back" size={18} color="#a0c4ff" />
+          <Text style={styles.backText}>Go Back</Text>
+        </TouchableOpacity>
+      </ScrollView>
+    );
+  }
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
@@ -147,11 +256,24 @@ export default function StudentLogin() {
           </View>
           <View style={styles.inputBox}>
             <Ionicons name="card-outline" size={20} color="#1D9E75" style={styles.inputIcon} />
-            <TextInput style={styles.input} placeholder="Reg Number e.g. R2211952R" placeholderTextColor="#aaa" value={regNumber} onChangeText={setRegNumber} autoCapitalize="characters" />
+            <TextInput
+              style={styles.input}
+              placeholder="Reg Number e.g. R2211952R"
+              placeholderTextColor="#aaa"
+              value={regNumber}
+              onChangeText={handleRegNumberChange}
+              autoCapitalize="characters"
+            />
           </View>
           <View style={styles.inputBox}>
             <Ionicons name="mail-outline" size={20} color="#1D9E75" style={styles.inputIcon} />
-            <TextInput style={styles.input} placeholder="R2211952R@students.msu.ac.zw" placeholderTextColor="#aaa" value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" />
+            <TextInput
+              style={[styles.input, { color: '#a0c4ff' }]}
+              placeholder="Email (auto-filled from reg number)"
+              placeholderTextColor="#aaa"
+              value={email}
+              editable={false}
+            />
           </View>
           <View style={styles.inputBox}>
             <Ionicons name="phone-portrait-outline" size={20} color="#1D9E75" style={styles.inputIcon} />
@@ -163,7 +285,14 @@ export default function StudentLogin() {
       {!isSignUp && (
         <View style={styles.inputBox}>
           <Ionicons name="card-outline" size={20} color="#1D9E75" style={styles.inputIcon} />
-          <TextInput style={styles.input} placeholder="Reg Number e.g. R2211952R" placeholderTextColor="#aaa" value={loginReg} onChangeText={setLoginReg} autoCapitalize="characters" />
+          <TextInput
+            style={styles.input}
+            placeholder="Reg Number e.g. R2211952R"
+            placeholderTextColor="#aaa"
+            value={loginReg}
+            onChangeText={(t) => setLoginReg(t.toUpperCase())}
+            autoCapitalize="characters"
+          />
         </View>
       )}
 
@@ -216,7 +345,7 @@ export default function StudentLogin() {
         <Text style={styles.btnText}>{loading ? 'Please wait...' : isSignUp ? 'Create Account' : 'Login'}</Text>
       </TouchableOpacity>
 
-      <TouchableOpacity onPress={() => { setIsSignUp(!isSignUp); setPassword(''); setConfirmPassword(''); setPasswordStrength(''); }}>
+      <TouchableOpacity onPress={() => { setIsSignUp(!isSignUp); setPassword(''); setConfirmPassword(''); setPasswordStrength(''); setRegNumber(''); setEmail(''); }}>
         <Text style={styles.switchText}>{isSignUp ? 'Already have an account? Login' : "Don't have an account? Sign Up"}</Text>
       </TouchableOpacity>
 
