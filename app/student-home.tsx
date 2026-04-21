@@ -1,25 +1,80 @@
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Animated, ScrollView, Share, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { supabase } from '../database/supabase';
+
+function AnimatedBell({ hasNotif }: { hasNotif: boolean }) {
+  const wiggle = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (!hasNotif) return;
+    const anim = Animated.loop(Animated.sequence([
+      Animated.timing(wiggle, { toValue: 1, duration: 100, useNativeDriver: true }),
+      Animated.timing(wiggle, { toValue: -1, duration: 100, useNativeDriver: true }),
+      Animated.timing(wiggle, { toValue: 1, duration: 100, useNativeDriver: true }),
+      Animated.timing(wiggle, { toValue: 0, duration: 100, useNativeDriver: true }),
+      Animated.delay(2000),
+    ]));
+    anim.start();
+    return () => anim.stop();
+  }, [hasNotif]);
+  const rotate = wiggle.interpolate({ inputRange: [-1, 1], outputRange: ['-15deg', '15deg'] });
+  return (
+    <Animated.View style={{ transform: [{ rotate }] }}>
+      <Ionicons name="notifications" size={30} color="#FFD700" />
+      {hasNotif && <View style={styles.notifDot} />}
+    </Animated.View>
+  );
+}
+
+function AnimatedRadio() {
+  const pulse = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    Animated.loop(Animated.sequence([
+      Animated.timing(pulse, { toValue: 1.2, duration: 600, useNativeDriver: true }),
+      Animated.timing(pulse, { toValue: 1, duration: 600, useNativeDriver: true }),
+    ])).start();
+  }, []);
+  return (
+    <Animated.View style={{ transform: [{ scale: pulse }] }}>
+      <Ionicons name="radio" size={30} color="#FFD700" />
+    </Animated.View>
+  );
+}
 
 export default function StudentHome() {
   const router = useRouter();
   const [student, setStudent] = useState<any>(null);
+  const [hasNotif, setHasNotif] = useState(false);
 
   useEffect(() => { loadStudent(); }, []);
 
   const loadStudent = async () => {
     try {
       const saved = await AsyncStorage.getItem('current_student');
-      if (saved) setStudent(JSON.parse(saved));
+      if (saved) {
+        setStudent(JSON.parse(saved));
+        checkNotifications();
+      }
     } catch (e) {}
+  };
+
+  const checkNotifications = async () => {
+    const { count } = await supabase.from('notifications').select('*', { count: 'exact', head: true }).eq('is_read', 0);
+    setHasNotif((count || 0) > 0);
   };
 
   const handleLogout = async () => {
     await AsyncStorage.removeItem('current_student');
     router.replace('/');
+  };
+
+  const handleShare = async () => {
+    await Share.share({
+      message: 'Check out Campus IQ — the smart campus companion for MSU students! Stay connected with your campus, attend classes, take quizzes and more.',
+      title: 'Campus IQ - MSU',
+    });
   };
 
   const getTimeGreeting = () => {
@@ -106,11 +161,23 @@ export default function StudentHome() {
           <Text style={styles.cardSub}>Student chat</Text>
         </TouchableOpacity>
       </View>
+      <View style={styles.row}>
+        <TouchableOpacity style={[styles.card, styles.orange]} onPress={() => router.push('/games')}>
+          <Ionicons name="game-controller-outline" size={30} color="#FFD700" />
+          <Text style={styles.cardTitle}>Games</Text>
+          <Text style={styles.cardSub}>Play offline</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.card, styles.orange]} onPress={() => router.push('/anonymous-report')}>
+          <Ionicons name="shield-outline" size={30} color="#FFD700" />
+          <Text style={styles.cardTitle}>Report</Text>
+          <Text style={styles.cardSub}>Anonymous</Text>
+        </TouchableOpacity>
+      </View>
 
       <Text style={styles.sectionTitle}>Campus Life</Text>
       <View style={styles.row}>
         <TouchableOpacity style={[styles.card, styles.dark]} onPress={() => router.push('/msu-radio')}>
-          <Ionicons name="radio-outline" size={30} color="#FFD700" />
+          <AnimatedRadio />
           <Text style={styles.cardTitle}>MSU Radio</Text>
           <Text style={styles.cardSub}>Listen live</Text>
         </TouchableOpacity>
@@ -121,8 +188,8 @@ export default function StudentHome() {
         </TouchableOpacity>
       </View>
       <View style={styles.row}>
-        <TouchableOpacity style={[styles.card, styles.dark]} onPress={() => router.push('/notifications')}>
-          <Ionicons name="notifications-outline" size={30} color="#FFD700" />
+        <TouchableOpacity style={[styles.card, styles.dark]} onPress={() => { router.push('/notifications'); setHasNotif(false); }}>
+          <AnimatedBell hasNotif={hasNotif} />
           <Text style={styles.cardTitle}>Notifications</Text>
           <Text style={styles.cardSub}>Updates</Text>
         </TouchableOpacity>
@@ -133,12 +200,16 @@ export default function StudentHome() {
         </TouchableOpacity>
       </View>
       <View style={styles.row}>
-        <TouchableOpacity style={[styles.card, styles.dark]}>
+        <TouchableOpacity style={[styles.card, styles.dark]} onPress={() => router.push('/src-elections')}>
           <Ionicons name="people-outline" size={30} color="#FFD700" />
-          <Text style={styles.cardTitle}>Student Body</Text>
-          <Text style={styles.cardSub}>SRC updates</Text>
+          <Text style={styles.cardTitle}>SRC Elections</Text>
+          <Text style={styles.cardSub}>Vote now</Text>
         </TouchableOpacity>
-        <View style={[styles.card, { backgroundColor: 'transparent', borderWidth: 0 }]} />
+        <TouchableOpacity style={[styles.card, styles.dark]} onPress={handleShare}>
+          <Ionicons name="share-social-outline" size={30} color="#FFD700" />
+          <Text style={styles.cardTitle}>Share App</Text>
+          <Text style={styles.cardSub}>Invite friends</Text>
+        </TouchableOpacity>
       </View>
 
       <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
@@ -164,6 +235,7 @@ const styles = StyleSheet.create({
   dark: { backgroundColor: '#0a1a2e', borderWidth: 1, borderColor: '#a0c4ff' },
   cardTitle: { fontSize: 15, fontWeight: 'bold', color: '#ffffff', marginTop: 10, textAlign: 'center' },
   cardSub: { fontSize: 11, color: '#a0c4ff', marginTop: 4, textAlign: 'center' },
+  notifDot: { position: 'absolute', top: -2, right: -2, width: 10, height: 10, borderRadius: 5, backgroundColor: '#D85A30', borderWidth: 1, borderColor: '#001f4d' },
   logoutBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 16, marginTop: 10, marginBottom: 40 },
   logoutText: { color: '#ffaaaa', fontSize: 16 },
 });

@@ -44,6 +44,11 @@ export default function RootLayout() {
         <Stack.Screen name="create-quiz" />
         <Stack.Screen name="lecturer-change-password" />
         <Stack.Screen name="forgot-password" />
+        <Stack.Screen name="lost-found" />
+        <Stack.Screen name="anonymous-report" />
+        <Stack.Screen name="games" />
+        <Stack.Screen name="src-elections" />
+        <Stack.Screen name="manage-users" />
       </Stack>
       <StatusBar style="light" />
     </>
