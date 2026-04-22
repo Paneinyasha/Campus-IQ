@@ -2,43 +2,78 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { sendBroadcastSMS } from '../database/db';
 import { supabase } from '../database/supabase';
-
-
 
 export default function Broadcast() {
   const router = useRouter();
   const [title, setTitle] = useState('');
   const [message, setMessage] = useState('');
-  const [target, setTarget] = useState('all');
+  const [target, setTarget] = useState<'all' | 'students' | 'lecturers'>('all');
   const [type, setType] = useState('general');
+  const [sendSMSAlso, setSendSMSAlso] = useState(true);
   const [sentNotifications, setSentNotifications] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [smsCount, setSmsCount] = useState(0);
 
-  useEffect(() => { loadSent(); }, []);
+  useEffect(() => { loadSent(); loadRecipientCount(); }, []);
+  useEffect(() => { loadRecipientCount(); }, [target]);
 
   const loadSent = async () => {
     const { data } = await supabase.from('notifications').select('*').order('created_at', { ascending: false }).limit(20);
     setSentNotifications(data || []);
   };
 
+  const loadRecipientCount = async () => {
+    let count = 0;
+    if (target === 'all' || target === 'students') {
+      const { count: sc } = await supabase.from('students').select('*', { count: 'exact', head: true }).eq('is_suspended', 0);
+      count += sc || 0;
+    }
+    if (target === 'all' || target === 'lecturers') {
+      const { count: lc } = await supabase.from('lecturers').select('*', { count: 'exact', head: true }).eq('is_suspended', 0);
+      count += lc || 0;
+    }
+    setSmsCount(count);
+  };
+
   const handleSend = async () => {
     if (!title || !message) { Alert.alert('Missing Fields', 'Please enter a title and message'); return; }
-    Alert.alert('Send Notification', `Send "${title}" to ${target === 'all' ? 'everyone' : target}?`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Send', onPress: async () => {
-          setLoading(true);
-          try {
-            const { error } = await supabase.from('notifications').insert({ title, message, target, type });
-            if (error) { Alert.alert('Error', 'Could not send notification: ' + error.message); return; }
-            Alert.alert('Sent!', 'Notification sent to all users successfully!');
-            setTitle(''); setMessage('');
-            loadSent();
-          } finally { setLoading(false); }
+    const targetLabel = target === 'all' ? 'everyone' : target;
+    const smsNote = sendSMSAlso ? `\n📱 SMS will also be sent to ${smsCount} ${targetLabel}` : '';
+    Alert.alert(
+      'Send Notification',
+      `Send "${title}" to ${targetLabel}?${smsNote}`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Send', onPress: async () => {
+            setLoading(true);
+            try {
+              // Save to database (in-app notification)
+              const { error } = await supabase.from('notifications').insert({ title, message, target, type });
+              if (error) { Alert.alert('Error', 'Could not send notification: ' + error.message); return; }
+
+              // Send SMS if enabled
+              if (sendSMSAlso) {
+                const smsMessage = `${title}\n\n${message}`;
+                const smsResult = await sendBroadcastSMS(smsMessage, target);
+                if (smsResult.success) {
+                  Alert.alert('✅ Sent!', `Notification sent in-app.\nSMS delivered to ${smsResult.count} recipients.`);
+                } else {
+                  Alert.alert('⚠️ Partial', 'In-app notification sent but SMS failed. Check your Africa\'s Talking account.');
+                }
+              } else {
+                Alert.alert('✅ Sent!', 'In-app notification sent successfully!');
+              }
+
+              setTitle(''); setMessage('');
+              loadSent();
+            } finally { setLoading(false); }
+          }
         }
-      }
-    ]);
+      ]
+    );
   };
 
   const deleteNotification = async (id: string) => {
@@ -69,17 +104,30 @@ export default function Broadcast() {
 
       <View style={styles.form}>
         <Text style={styles.formTitle}>Send New Notification</Text>
+
         <View style={styles.inputBox}>
           <Ionicons name="text-outline" size={20} color="#D85A30" style={styles.inputIcon} />
           <TextInput style={styles.input} placeholder="Notification Title" placeholderTextColor="#aaa" value={title} onChangeText={setTitle} />
         </View>
-        <TextInput style={styles.messageInput} placeholder="Write your message here..." placeholderTextColor="#aaa" value={message} onChangeText={setMessage} multiline numberOfLines={4} textAlignVertical="top" />
+
+        <TextInput
+          style={styles.messageInput}
+          placeholder="Write your message here..."
+          placeholderTextColor="#aaa"
+          value={message}
+          onChangeText={setMessage}
+          multiline
+          numberOfLines={4}
+          textAlignVertical="top"
+        />
 
         <Text style={styles.label}>Send To</Text>
         <View style={styles.targetRow}>
-          {['all', 'students', 'lecturers'].map((t) => (
+          {(['all', 'students', 'lecturers'] as const).map((t) => (
             <TouchableOpacity key={t} style={[styles.targetBtn, target === t && styles.targetBtnActive]} onPress={() => setTarget(t)}>
-              <Text style={[styles.targetText, target === t && styles.targetTextActive]}>{t === 'all' ? 'Everyone' : t === 'students' ? 'Students' : 'Lecturers'}</Text>
+              <Text style={[styles.targetText, target === t && styles.targetTextActive]}>
+                {t === 'all' ? 'Everyone' : t === 'students' ? 'Students' : 'Lecturers'}
+              </Text>
             </TouchableOpacity>
           ))}
         </View>
@@ -93,9 +141,26 @@ export default function Broadcast() {
           ))}
         </View>
 
+        {/* SMS Toggle */}
+        <TouchableOpacity style={styles.smsToggle} onPress={() => setSendSMSAlso(!sendSMSAlso)}>
+          <View style={[styles.smsToggleIcon, sendSMSAlso && styles.smsToggleIconActive]}>
+            <Ionicons name={sendSMSAlso ? 'checkmark' : 'close'} size={16} color="#fff" />
+          </View>
+          <View style={styles.smsToggleText}>
+            <Text style={styles.smsToggleTitle}>
+              📱 Also send as SMS
+            </Text>
+            <Text style={styles.smsToggleSub}>
+              {sendSMSAlso
+                ? `Will send to ${smsCount} ${target === 'all' ? 'recipients' : target} via Africa's Talking`
+                : 'SMS delivery disabled — in-app only'}
+            </Text>
+          </View>
+        </TouchableOpacity>
+
         <TouchableOpacity style={[styles.sendBtn, loading && { opacity: 0.6 }]} onPress={handleSend} disabled={loading}>
-          <Ionicons name="send-outline" size={22} color="#ffffff" />
-          <Text style={styles.sendBtnText}>{loading ? 'Sending...' : 'Send Notification'}</Text>
+          <Ionicons name={sendSMSAlso ? 'phone-portrait-outline' : 'send-outline'} size={22} color="#ffffff" />
+          <Text style={styles.sendBtnText}>{loading ? 'Sending...' : sendSMSAlso ? 'Send + SMS' : 'Send Notification'}</Text>
         </TouchableOpacity>
       </View>
 
@@ -138,7 +203,7 @@ const styles = StyleSheet.create({
   input: { flex: 1, fontSize: 15, color: '#ffffff' },
   messageInput: { backgroundColor: '#1a1a2e', borderWidth: 1, borderColor: '#D85A30', padding: 14, borderRadius: 10, fontSize: 15, color: '#ffffff', marginBottom: 16, minHeight: 100 },
   label: { fontSize: 14, fontWeight: 'bold', color: '#a0c4ff', marginBottom: 10 },
-  targetRow: { flexDirection: 'row', gap: 8, marginBottom: 16 },
+  targetRow: { flexDirection: 'row', gap: 8, marginBottom: 16, flexWrap: 'wrap' },
   targetBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: '#534AB7', backgroundColor: '#1a1a2e' },
   targetBtnActive: { backgroundColor: '#534AB7' },
   targetText: { color: '#a0c4ff', fontSize: 13 },
@@ -146,6 +211,12 @@ const styles = StyleSheet.create({
   typeBtn: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: '#534AB7', backgroundColor: '#1a1a2e' },
   typeText: { color: '#a0c4ff', fontSize: 12 },
   typeTextActive: { color: '#ffffff', fontWeight: 'bold' },
+  smsToggle: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0a2a4a', borderWidth: 1, borderColor: '#1D9E75', borderRadius: 12, padding: 12, marginBottom: 16, gap: 12 },
+  smsToggleIcon: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#D85A30', alignItems: 'center', justifyContent: 'center' },
+  smsToggleIconActive: { backgroundColor: '#1D9E75' },
+  smsToggleText: { flex: 1 },
+  smsToggleTitle: { color: '#ffffff', fontSize: 14, fontWeight: 'bold' },
+  smsToggleSub: { color: '#a0c4ff', fontSize: 12, marginTop: 2 },
   sendBtn: { backgroundColor: '#D85A30', padding: 14, borderRadius: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 4 },
   sendBtnText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold' },
   sectionTitle: { fontSize: 16, fontWeight: 'bold', color: '#FFD700', marginBottom: 14, letterSpacing: 1 },
