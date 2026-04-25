@@ -217,7 +217,7 @@ export default function StudentHome() {
           <AnimatedRadio /><Text style={styles.cardTitle}>MSU Radio</Text><Text style={styles.cardSub}>Listen live</Text>
         </TouchableOpacity>
         <TouchableOpacity style={[styles.card, styles.dark]} onPress={() => router.push('/campus-map')}>
-          <AnimatedMap /><Text style={styles.cardTitle}>Campus Map</Text><Text style={styles.cardSub}>Find your way</Text>
+          <AnimatedMap /><Text style={styles.cardTitle}>Campus Maps</Text><Text style={styles.cardSub}>Find your way</Text>
         </TouchableOpacity>
       </View>
       <View style={styles.row}>

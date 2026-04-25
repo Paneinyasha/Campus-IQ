@@ -117,7 +117,7 @@ export default function WelcomeScreen() {
         <Text style={styles.shareText}>Share Campus IQ</Text>
       </TouchableOpacity>
 
-      <Text style={styles.footer}>MSU Campus IQ v1.0 © 2026</Text>
+      <Text style={styles.footer}>Campus IQ by Paneinyasha v1.0 © 2026</Text>
     </View>
   );
 }

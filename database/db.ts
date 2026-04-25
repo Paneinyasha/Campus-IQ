@@ -4,97 +4,10 @@ export const initDatabase = async () => {
   console.log('Campus IQ connected to Supabase');
 };
 
-// ===================== CONFIG =====================
-const MAILTRAP_API_KEY = '8d572d0fc2abf1a3aa637fda4a030652';
-const AT_API_KEY = 'atsk_4014260f2d12f20c627639ff335dda99374d52bbebe0febdb64a6586899a60df5293309b';
-const AT_USERNAME = 'sandbox'; // Change to real username when going live
-
-// ===================== HELPERS =====================
-const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
-
-const formatZimbabwePhone = (phone: string): string => {
-  let p = phone.replace(/\s+/g, '').replace(/-/g, '');
-  if (p.startsWith('00263')) p = '+' + p.slice(2);
-  if (p.startsWith('263')) p = '+' + p;
-  if (p.startsWith('0')) p = '+263' + p.slice(1);
-  if (!p.startsWith('+')) p = '+263' + p;
-  return p;
-};
-
-const sendSMS = async (phone: string, message: string): Promise<boolean> => {
-  try {
-    const formattedPhone = formatZimbabwePhone(phone);
-    const body = new URLSearchParams({
-      username: AT_USERNAME,
-      to: formattedPhone,
-      message,
-    });
-    const response = await fetch('https://api.sandbox.africastalking.com/version1/messaging', {
-      method: 'POST',
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'apiKey': AT_API_KEY,
-      },
-      body: body.toString(),
-    });
-    const result = await response.json();
-    const status = result?.SMSMessageData?.Recipients?.[0]?.status;
-    return status === 'Success' || response.ok;
-  } catch (e) {
-    console.log('SMS error:', e);
-    return false;
-  }
-};
-
-const sendOTPEmail = async (email: string, name: string, otp: string) => {
-  try {
-    await fetch('https://send.api.mailtrap.io/api/send', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${MAILTRAP_API_KEY}`,
-      },
-      body: JSON.stringify({
-        from: { email: 'noreply@campusiq.ac.zw', name: 'Campus IQ MSU' },
-        to: [{ email: email.toLowerCase(), name }],
-        subject: 'Campus IQ - Email Verification Code',
-        html: `<div style="font-family:Arial,sans-serif;background:#001f4d;color:#fff;padding:32px;border-radius:16px;max-width:500px;margin:0 auto">
-          <h1 style="color:#FFD700;text-align:center">Campus IQ</h1>
-          <h2 style="color:#1D9E75;text-align:center">Email Verification</h2>
-          <p style="color:#a0c4ff">Hi <strong>${name}</strong>,</p>
-          <p style="color:#a0c4ff">Your verification code is:</p>
-          <div style="background:#0a2a4a;border:2px solid #1D9E75;border-radius:12px;padding:24px;text-align:center;margin:24px 0">
-            <span style="font-size:42px;font-weight:bold;letter-spacing:12px;color:#FFD700">${otp}</span>
-          </div>
-          <p style="color:#a0c4ff">This code expires in <strong>10 minutes</strong>.</p>
-          <p style="color:#7a9cc4;font-size:12px;text-align:center">Midlands State University Campus IQ 2026</p>
-        </div>`,
-      }),
-    });
-  } catch (e) {
-    console.log('Email error:', e);
-  }
-};
-
-// ===================== BROADCAST SMS =====================
+// ===================== BROADCAST SMS (disabled until AT is live) =====================
 export const sendBroadcastSMS = async (message: string, target: 'all' | 'students' | 'lecturers') => {
-  try {
-    const phones: string[] = [];
-    if (target === 'all' || target === 'students') {
-      const { data: students } = await supabase.from('students').select('phone').eq('is_suspended', 0);
-      (students || []).forEach((s: any) => { if (s.phone) phones.push(s.phone); });
-    }
-    if (target === 'all' || target === 'lecturers') {
-      const { data: lecturers } = await supabase.from('lecturers').select('phone').eq('is_suspended', 0);
-      (lecturers || []).forEach((l: any) => { if (l.phone) phones.push(l.phone); });
-    }
-    const smsText = `Campus IQ:\n${message}\n- MSU`;
-    for (const phone of phones) await sendSMS(phone, smsText);
-    return { success: true, count: phones.length };
-  } catch (e: any) {
-    return { success: false, error: e.message };
-  }
+  // SMS disabled until Africa's Talking is topped up
+  return { success: true, count: 0 };
 };
 
 // ===================== STUDENT AUTH =====================
@@ -104,70 +17,24 @@ export const registerStudent = async (
 ) => {
   try {
     const { data: existing } = await supabase
-      .from('students').select('id')
+      .from('students')
+      .select('id')
       .or(`email.eq.${email.toLowerCase()},reg_number.eq.${regNumber}`)
       .maybeSingle();
-    if (existing) return { success: false, error: 'Email or reg number already exists' };
-
-    const otp = generateOTP();
-    const otpExpiry = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+    if (existing) return { success: false, error: 'An account with this email or reg number already exists' };
 
     const { error } = await supabase.from('students').insert({
-      name, surname, program,
+      name,
+      surname,
+      program,
       reg_number: regNumber,
       email: email.toLowerCase(),
-      password, phone,
-      otp_code: otp,
-      otp_expiry: otpExpiry,
-      is_verified: 0,
+      password,
+      phone,
+      is_verified: 1,   // Auto verified — no OTP needed
       is_suspended: 0,
     });
     if (error) return { success: false, error: error.message };
-
-    await Promise.all([
-      sendOTPEmail(email.toLowerCase(), name, otp),
-      sendSMS(phone, `Campus IQ Verification Code: ${otp}\nExpires in 10 minutes. Do not share.`),
-    ]);
-
-    return { success: true };
-  } catch (error: any) {
-    return { success: false, error: error.message };
-  }
-};
-
-export const verifyStudentOTP = async (email: string, otp: string) => {
-  try {
-    const { data, error } = await supabase
-      .from('students').select('*')
-      .eq('email', email.toLowerCase())
-      .eq('otp_code', otp)
-      .single();
-    if (error || !data) return { success: false, error: 'Invalid OTP' };
-    if (new Date() > new Date(data.otp_expiry))
-      return { success: false, error: 'OTP has expired. Please request a new one.' };
-    await supabase.from('students')
-      .update({ is_verified: 1, otp_code: null, otp_expiry: null })
-      .eq('email', email.toLowerCase());
-    return { success: true };
-  } catch (error: any) {
-    return { success: false, error: error.message };
-  }
-};
-
-export const resendStudentOTP = async (email: string) => {
-  try {
-    const { data } = await supabase.from('students').select('name, phone')
-      .eq('email', email.toLowerCase()).single();
-    if (!data) return { success: false, error: 'Email not found' };
-    const otp = generateOTP();
-    const otpExpiry = new Date(Date.now() + 10 * 60 * 1000).toISOString();
-    await supabase.from('students')
-      .update({ otp_code: otp, otp_expiry: otpExpiry })
-      .eq('email', email.toLowerCase());
-    await Promise.all([
-      sendOTPEmail(email.toLowerCase(), data.name, otp),
-      data.phone ? sendSMS(data.phone, `Campus IQ Verification Code: ${otp}\nExpires in 10 minutes.`) : Promise.resolve(),
-    ]);
     return { success: true };
   } catch (error: any) {
     return { success: false, error: error.message };
@@ -176,10 +43,14 @@ export const resendStudentOTP = async (email: string) => {
 
 export const loginStudent = async (email: string, password: string) => {
   try {
-    const { data, error } = await supabase.from('students').select('*')
-      .eq('email', email.toLowerCase()).eq('password', password).eq('is_suspended', 0).single();
+    const { data, error } = await supabase
+      .from('students')
+      .select('*')
+      .eq('email', email.toLowerCase())
+      .eq('password', password)
+      .eq('is_suspended', 0)
+      .single();
     if (error || !data) return { success: false, error: 'incorrect' };
-    if (!data.is_verified) return { success: false, error: 'unverified', email };
     return { success: true, student: data };
   } catch (error: any) {
     return { success: false, error: 'incorrect' };
@@ -188,8 +59,13 @@ export const loginStudent = async (email: string, password: string) => {
 
 export const loginLecturer = async (email: string, password: string) => {
   try {
-    const { data, error } = await supabase.from('lecturers').select('*')
-      .eq('email', email).eq('password', password).eq('is_suspended', 0).single();
+    const { data, error } = await supabase
+      .from('lecturers')
+      .select('*')
+      .eq('email', email)
+      .eq('password', password)
+      .eq('is_suspended', 0)
+      .single();
     if (error || !data) return { success: false };
     return { success: true, lecturer: data };
   } catch (error: any) {
@@ -245,7 +121,8 @@ export const getAllStudents = async () => {
 export const suspendUser = async (id: string, type: string, reason: string) => {
   try {
     const table = type === 'student' ? 'students' : 'lecturers';
-    const { error } = await supabase.from(table).update({ is_suspended: 1, suspend_reason: reason }).eq('id', id);
+    const { error } = await supabase.from(table)
+      .update({ is_suspended: 1, suspend_reason: reason }).eq('id', id);
     if (error) return { success: false };
     return { success: true };
   } catch (error: any) {
@@ -256,7 +133,8 @@ export const suspendUser = async (id: string, type: string, reason: string) => {
 export const unsuspendUser = async (id: string, type: string, reason: string) => {
   try {
     const table = type === 'student' ? 'students' : 'lecturers';
-    const { error } = await supabase.from(table).update({ is_suspended: 0, suspend_reason: reason }).eq('id', id);
+    const { error } = await supabase.from(table)
+      .update({ is_suspended: 0, suspend_reason: reason }).eq('id', id);
     if (error) return { success: false };
     return { success: true };
   } catch (error: any) {
