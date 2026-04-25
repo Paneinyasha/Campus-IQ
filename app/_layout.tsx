@@ -49,6 +49,8 @@ export default function RootLayout() {
         <Stack.Screen name="games" />
         <Stack.Screen name="src-elections" />
         <Stack.Screen name="manage-users" />
+        <Stack.Screen name="my-classes" />
+        <Stack.Screen name="emergency-services" />
       </Stack>
       <StatusBar style="light" />
     </>

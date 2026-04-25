@@ -1,26 +1,30 @@
 {
   "expo": {
-    "name": "CampusIQ",
+    "name": "Campus IQ",
     "slug": "CampusIQ",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/image_8906d951.png",
     "scheme": "campusiq",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": false,
+
     "ios": {
       "supportsTablet": true
     },
+
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/icon.png"
+        "backgroundColor": "#1a1650",
+        "foregroundImage": "./assets/images/image_8906d951.png"
       }
     },
+
     "plugins": [
       "expo-router",
       "expo-sqlite"
     ],
+
     "experiments": {
       "typedRoutes": true
     }

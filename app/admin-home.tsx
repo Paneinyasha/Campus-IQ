@@ -7,210 +7,27 @@ import { getAllLecturers, getAllStudents, getAllVenues } from '../database/db';
 import { supabase } from '../database/supabase';
 
 function AnimatedBell({ hasNotif }: { hasNotif: boolean }) {
-  const wiggle = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    const anim = Animated.loop(Animated.sequence([
-      Animated.timing(wiggle, { toValue: 1, duration: 80, useNativeDriver: true }),
-      Animated.timing(wiggle, { toValue: -1, duration: 80, useNativeDriver: true }),
-      Animated.timing(wiggle, { toValue: 1, duration: 80, useNativeDriver: true }),
-      Animated.timing(wiggle, { toValue: 0, duration: 80, useNativeDriver: true }),
-      Animated.delay(hasNotif ? 1500 : 4000),
-    ]));
-    anim.start();
-    return () => anim.stop();
-  }, [hasNotif]);
-  const rotate = wiggle.interpolate({ inputRange: [-1, 1], outputRange: ['-20deg', '20deg'] });
-  return (
-    <View>
-      <Animated.View style={{ transform: [{ rotate }] }}>
-        <Ionicons name="notifications" size={30} color="#FFD700" />
-      </Animated.View>
-      {hasNotif && <View style={styles.notifDot} />}
-    </View>
-  );
+  const w = useRef(new Animated.Value(0)).current;
+  useEffect(() => { const a = Animated.loop(Animated.sequence([Animated.timing(w, { toValue: 1, duration: 80, useNativeDriver: true }), Animated.timing(w, { toValue: -1, duration: 80, useNativeDriver: true }), Animated.timing(w, { toValue: 1, duration: 80, useNativeDriver: true }), Animated.timing(w, { toValue: 0, duration: 80, useNativeDriver: true }), Animated.delay(hasNotif ? 1500 : 4000)])); a.start(); return () => a.stop(); }, [hasNotif]);
+  const rotate = w.interpolate({ inputRange: [-1, 1], outputRange: ['-20deg', '20deg'] });
+  return (<View><Animated.View style={{ transform: [{ rotate }] }}><Ionicons name="notifications" size={30} color="#FFD700" /></Animated.View>{hasNotif && <View style={styles.notifDot} />}</View>);
 }
-
-function AnimatedRadio() {
-  const pulse = useRef(new Animated.Value(1)).current;
-  useEffect(() => {
-    Animated.loop(Animated.sequence([
-      Animated.timing(pulse, { toValue: 1.25, duration: 500, useNativeDriver: true }),
-      Animated.timing(pulse, { toValue: 1, duration: 500, useNativeDriver: true }),
-    ])).start();
-  }, []);
-  return <Animated.View style={{ transform: [{ scale: pulse }] }}><Ionicons name="radio" size={30} color="#FFD700" /></Animated.View>;
-}
-
-function AnimatedPeopleCircle() {
-  const scale = useRef(new Animated.Value(1)).current;
-  useEffect(() => {
-    Animated.loop(Animated.sequence([
-      Animated.delay(2000),
-      Animated.timing(scale, { toValue: 1.15, duration: 300, useNativeDriver: true }),
-      Animated.timing(scale, { toValue: 1, duration: 300, useNativeDriver: true }),
-    ])).start();
-  }, []);
-  return <Animated.View style={{ transform: [{ scale }] }}><Ionicons name="people-circle" size={30} color="#FFD700" /></Animated.View>;
-}
-
-function AnimatedPersonAdd() {
-  const slide = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    Animated.loop(Animated.sequence([
-      Animated.delay(2500),
-      Animated.timing(slide, { toValue: -4, duration: 200, useNativeDriver: true }),
-      Animated.timing(slide, { toValue: 0, duration: 200, useNativeDriver: true }),
-    ])).start();
-  }, []);
-  return <Animated.View style={{ transform: [{ translateX: slide }] }}><Ionicons name="person-add" size={30} color="#FFD700" /></Animated.View>;
-}
-
-function AnimatedPerson() {
-  const bounce = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    Animated.loop(Animated.sequence([
-      Animated.timing(bounce, { toValue: -5, duration: 300, useNativeDriver: true }),
-      Animated.timing(bounce, { toValue: 0, duration: 300, useNativeDriver: true }),
-      Animated.delay(3000),
-    ])).start();
-  }, []);
-  return <Animated.View style={{ transform: [{ translateY: bounce }] }}><Ionicons name="person" size={30} color="#FFD700" /></Animated.View>;
-}
-
-function AnimatedBan() {
-  const spin = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    Animated.loop(Animated.sequence([
-      Animated.delay(3000),
-      Animated.timing(spin, { toValue: 1, duration: 500, useNativeDriver: true }),
-      Animated.timing(spin, { toValue: 0, duration: 0, useNativeDriver: true }),
-    ])).start();
-  }, []);
-  const rotate = spin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
-  return <Animated.View style={{ transform: [{ rotate }] }}><Ionicons name="ban" size={30} color="#FFD700" /></Animated.View>;
-}
-
-function AnimatedCalendar() {
-  const bounce = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    Animated.loop(Animated.sequence([
-      Animated.timing(bounce, { toValue: -6, duration: 400, useNativeDriver: true }),
-      Animated.timing(bounce, { toValue: 0, duration: 400, useNativeDriver: true }),
-      Animated.delay(2000),
-    ])).start();
-  }, []);
-  return <Animated.View style={{ transform: [{ translateY: bounce }] }}><Ionicons name="calendar" size={30} color="#FFD700" /></Animated.View>;
-}
-
-function AnimatedLocation() {
-  const bounce = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    Animated.loop(Animated.sequence([
-      Animated.timing(bounce, { toValue: -6, duration: 300, useNativeDriver: true }),
-      Animated.timing(bounce, { toValue: 0, duration: 300, useNativeDriver: true }),
-      Animated.delay(2500),
-    ])).start();
-  }, []);
-  return <Animated.View style={{ transform: [{ translateY: bounce }] }}><Ionicons name="location" size={30} color="#FFD700" /></Animated.View>;
-}
-
-function AnimatedMegaphone() {
-  const wiggle = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    Animated.loop(Animated.sequence([
-      Animated.delay(2000),
-      Animated.timing(wiggle, { toValue: 1, duration: 150, useNativeDriver: true }),
-      Animated.timing(wiggle, { toValue: -1, duration: 150, useNativeDriver: true }),
-      Animated.timing(wiggle, { toValue: 0, duration: 150, useNativeDriver: true }),
-    ])).start();
-  }, []);
-  const rotate = wiggle.interpolate({ inputRange: [-1, 1], outputRange: ['-10deg', '10deg'] });
-  return <Animated.View style={{ transform: [{ rotate }] }}><Ionicons name="megaphone" size={30} color="#FFD700" /></Animated.View>;
-}
-
-function AnimatedShield() {
-  const pulse = useRef(new Animated.Value(1)).current;
-  useEffect(() => {
-    Animated.loop(Animated.sequence([
-      Animated.timing(pulse, { toValue: 1.15, duration: 800, useNativeDriver: true }),
-      Animated.timing(pulse, { toValue: 1, duration: 800, useNativeDriver: true }),
-    ])).start();
-  }, []);
-  return <Animated.View style={{ transform: [{ scale: pulse }] }}><Ionicons name="shield-checkmark" size={30} color="#FFD700" /></Animated.View>;
-}
-
-function AnimatedSearch() {
-  const rotate = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    Animated.loop(Animated.sequence([
-      Animated.timing(rotate, { toValue: 1, duration: 400, useNativeDriver: true }),
-      Animated.timing(rotate, { toValue: -1, duration: 400, useNativeDriver: true }),
-      Animated.timing(rotate, { toValue: 0, duration: 400, useNativeDriver: true }),
-      Animated.delay(3000),
-    ])).start();
-  }, []);
-  const rot = rotate.interpolate({ inputRange: [-1, 1], outputRange: ['-15deg', '15deg'] });
-  return <Animated.View style={{ transform: [{ rotate: rot }] }}><Ionicons name="search" size={30} color="#FFD700" /></Animated.View>;
-}
-
-function AnimatedPeople() {
-  const wave = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    Animated.loop(Animated.sequence([
-      Animated.delay(2000),
-      Animated.timing(wave, { toValue: 1, duration: 300, useNativeDriver: true }),
-      Animated.timing(wave, { toValue: 0, duration: 300, useNativeDriver: true }),
-    ])).start();
-  }, []);
-  const translateY = wave.interpolate({ inputRange: [0, 1], outputRange: [0, -6] });
-  return <Animated.View style={{ transform: [{ translateY }] }}><Ionicons name="people" size={30} color="#FFD700" /></Animated.View>;
-}
-
-function AnimatedBarChart() {
-  const scale = useRef(new Animated.Value(1)).current;
-  useEffect(() => {
-    Animated.loop(Animated.sequence([
-      Animated.delay(2500),
-      Animated.timing(scale, { toValue: 1.15, duration: 300, useNativeDriver: true }),
-      Animated.timing(scale, { toValue: 1, duration: 300, useNativeDriver: true }),
-    ])).start();
-  }, []);
-  return <Animated.View style={{ transform: [{ scale }] }}><Ionicons name="bar-chart" size={30} color="#FFD700" /></Animated.View>;
-}
-
-function AnimatedSettings() {
-  const spin = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    Animated.loop(Animated.timing(spin, { toValue: 1, duration: 4000, easing: Easing.linear, useNativeDriver: true })).start();
-  }, []);
-  const rotate = spin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
-  return <Animated.View style={{ transform: [{ rotate }] }}><Ionicons name="settings" size={30} color="#FFD700" /></Animated.View>;
-}
-
-function AnimatedMap() {
-  const drop = useRef(new Animated.Value(-4)).current;
-  useEffect(() => {
-    Animated.loop(Animated.sequence([
-      Animated.timing(drop, { toValue: 4, duration: 600, useNativeDriver: true }),
-      Animated.timing(drop, { toValue: -4, duration: 600, useNativeDriver: true }),
-      Animated.delay(2000),
-    ])).start();
-  }, []);
-  return <Animated.View style={{ transform: [{ translateY: drop }] }}><Ionicons name="map" size={30} color="#FFD700" /></Animated.View>;
-}
-
-function AnimatedShare() {
-  const spin = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    Animated.loop(Animated.sequence([
-      Animated.delay(3000),
-      Animated.timing(spin, { toValue: 1, duration: 600, useNativeDriver: true }),
-      Animated.timing(spin, { toValue: 0, duration: 0, useNativeDriver: true }),
-    ])).start();
-  }, []);
-  const rotate = spin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
-  return <Animated.View style={{ transform: [{ rotate }] }}><Ionicons name="share-social" size={30} color="#FFD700" /></Animated.View>;
-}
+function AnimatedRadio() { const p = useRef(new Animated.Value(1)).current; useEffect(() => { Animated.loop(Animated.sequence([Animated.timing(p, { toValue: 1.25, duration: 500, useNativeDriver: true }), Animated.timing(p, { toValue: 1, duration: 500, useNativeDriver: true })])).start(); }, []); return <Animated.View style={{ transform: [{ scale: p }] }}><Ionicons name="radio" size={30} color="#FFD700" /></Animated.View>; }
+function AnimatedPeopleCircle() { const s = useRef(new Animated.Value(1)).current; useEffect(() => { Animated.loop(Animated.sequence([Animated.delay(2000), Animated.timing(s, { toValue: 1.15, duration: 300, useNativeDriver: true }), Animated.timing(s, { toValue: 1, duration: 300, useNativeDriver: true })])).start(); }, []); return <Animated.View style={{ transform: [{ scale: s }] }}><Ionicons name="people-circle" size={30} color="#FFD700" /></Animated.View>; }
+function AnimatedPersonAdd() { const s = useRef(new Animated.Value(0)).current; useEffect(() => { Animated.loop(Animated.sequence([Animated.delay(2500), Animated.timing(s, { toValue: -4, duration: 200, useNativeDriver: true }), Animated.timing(s, { toValue: 0, duration: 200, useNativeDriver: true })])).start(); }, []); return <Animated.View style={{ transform: [{ translateX: s }] }}><Ionicons name="person-add" size={30} color="#FFD700" /></Animated.View>; }
+function AnimatedPerson() { const b = useRef(new Animated.Value(0)).current; useEffect(() => { Animated.loop(Animated.sequence([Animated.timing(b, { toValue: -5, duration: 300, useNativeDriver: true }), Animated.timing(b, { toValue: 0, duration: 300, useNativeDriver: true }), Animated.delay(3000)])).start(); }, []); return <Animated.View style={{ transform: [{ translateY: b }] }}><Ionicons name="person" size={30} color="#FFD700" /></Animated.View>; }
+function AnimatedBan() { const s = useRef(new Animated.Value(0)).current; useEffect(() => { Animated.loop(Animated.sequence([Animated.delay(3000), Animated.timing(s, { toValue: 1, duration: 500, useNativeDriver: true }), Animated.timing(s, { toValue: 0, duration: 0, useNativeDriver: true })])).start(); }, []); const rotate = s.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] }); return <Animated.View style={{ transform: [{ rotate }] }}><Ionicons name="ban" size={30} color="#FFD700" /></Animated.View>; }
+function AnimatedCalendar() { const b = useRef(new Animated.Value(0)).current; useEffect(() => { Animated.loop(Animated.sequence([Animated.timing(b, { toValue: -6, duration: 400, useNativeDriver: true }), Animated.timing(b, { toValue: 0, duration: 400, useNativeDriver: true }), Animated.delay(2000)])).start(); }, []); return <Animated.View style={{ transform: [{ translateY: b }] }}><Ionicons name="calendar" size={30} color="#FFD700" /></Animated.View>; }
+function AnimatedLocation() { const b = useRef(new Animated.Value(0)).current; useEffect(() => { Animated.loop(Animated.sequence([Animated.timing(b, { toValue: -6, duration: 300, useNativeDriver: true }), Animated.timing(b, { toValue: 0, duration: 300, useNativeDriver: true }), Animated.delay(2500)])).start(); }, []); return <Animated.View style={{ transform: [{ translateY: b }] }}><Ionicons name="location" size={30} color="#FFD700" /></Animated.View>; }
+function AnimatedMegaphone() { const w = useRef(new Animated.Value(0)).current; useEffect(() => { Animated.loop(Animated.sequence([Animated.delay(2000), Animated.timing(w, { toValue: 1, duration: 150, useNativeDriver: true }), Animated.timing(w, { toValue: -1, duration: 150, useNativeDriver: true }), Animated.timing(w, { toValue: 0, duration: 150, useNativeDriver: true })])).start(); }, []); const rotate = w.interpolate({ inputRange: [-1, 1], outputRange: ['-10deg', '10deg'] }); return <Animated.View style={{ transform: [{ rotate }] }}><Ionicons name="megaphone" size={30} color="#FFD700" /></Animated.View>; }
+function AnimatedShield() { const p = useRef(new Animated.Value(1)).current; useEffect(() => { Animated.loop(Animated.sequence([Animated.timing(p, { toValue: 1.15, duration: 800, useNativeDriver: true }), Animated.timing(p, { toValue: 1, duration: 800, useNativeDriver: true })])).start(); }, []); return <Animated.View style={{ transform: [{ scale: p }] }}><Ionicons name="shield-checkmark" size={30} color="#FFD700" /></Animated.View>; }
+function AnimatedSearch() { const r = useRef(new Animated.Value(0)).current; useEffect(() => { Animated.loop(Animated.sequence([Animated.timing(r, { toValue: 1, duration: 400, useNativeDriver: true }), Animated.timing(r, { toValue: -1, duration: 400, useNativeDriver: true }), Animated.timing(r, { toValue: 0, duration: 400, useNativeDriver: true }), Animated.delay(3000)])).start(); }, []); const rot = r.interpolate({ inputRange: [-1, 1], outputRange: ['-15deg', '15deg'] }); return <Animated.View style={{ transform: [{ rotate: rot }] }}><Ionicons name="search" size={30} color="#FFD700" /></Animated.View>; }
+function AnimatedPeople() { const w = useRef(new Animated.Value(0)).current; useEffect(() => { Animated.loop(Animated.sequence([Animated.delay(2000), Animated.timing(w, { toValue: 1, duration: 300, useNativeDriver: true }), Animated.timing(w, { toValue: 0, duration: 300, useNativeDriver: true })])).start(); }, []); const translateY = w.interpolate({ inputRange: [0, 1], outputRange: [0, -6] }); return <Animated.View style={{ transform: [{ translateY }] }}><Ionicons name="people" size={30} color="#FFD700" /></Animated.View>; }
+function AnimatedBarChart() { const s = useRef(new Animated.Value(1)).current; useEffect(() => { Animated.loop(Animated.sequence([Animated.delay(2500), Animated.timing(s, { toValue: 1.15, duration: 300, useNativeDriver: true }), Animated.timing(s, { toValue: 1, duration: 300, useNativeDriver: true })])).start(); }, []); return <Animated.View style={{ transform: [{ scale: s }] }}><Ionicons name="bar-chart" size={30} color="#FFD700" /></Animated.View>; }
+function AnimatedSettings() { const s = useRef(new Animated.Value(0)).current; useEffect(() => { Animated.loop(Animated.timing(s, { toValue: 1, duration: 4000, easing: Easing.linear, useNativeDriver: true })).start(); }, []); const rotate = s.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] }); return <Animated.View style={{ transform: [{ rotate }] }}><Ionicons name="settings" size={30} color="#FFD700" /></Animated.View>; }
+function AnimatedMap() { const d = useRef(new Animated.Value(-4)).current; useEffect(() => { Animated.loop(Animated.sequence([Animated.timing(d, { toValue: 4, duration: 600, useNativeDriver: true }), Animated.timing(d, { toValue: -4, duration: 600, useNativeDriver: true }), Animated.delay(2000)])).start(); }, []); return <Animated.View style={{ transform: [{ translateY: d }] }}><Ionicons name="map" size={30} color="#FFD700" /></Animated.View>; }
+function AnimatedShare() { const s = useRef(new Animated.Value(0)).current; useEffect(() => { Animated.loop(Animated.sequence([Animated.delay(3000), Animated.timing(s, { toValue: 1, duration: 600, useNativeDriver: true }), Animated.timing(s, { toValue: 0, duration: 0, useNativeDriver: true })])).start(); }, []); const rotate = s.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] }); return <Animated.View style={{ transform: [{ rotate }] }}><Ionicons name="share-social" size={30} color="#FFD700" /></Animated.View>; }
+function AnimatedMedical() { const p = useRef(new Animated.Value(1)).current; useEffect(() => { Animated.loop(Animated.sequence([Animated.timing(p, { toValue: 1.2, duration: 400, useNativeDriver: true }), Animated.timing(p, { toValue: 1, duration: 400, useNativeDriver: true }), Animated.delay(1000)])).start(); }, []); return <Animated.View style={{ transform: [{ scale: p }] }}><Ionicons name="medical" size={30} color="#D85A30" /></Animated.View>; }
 
 export default function AdminHome() {
   const router = useRouter();
@@ -221,41 +38,17 @@ export default function AdminHome() {
   const [hasNotif, setHasNotif] = useState(false);
 
   useEffect(() => { loadAdmin(); loadStats(); checkNotifications(); }, []);
-
-  const loadAdmin = async () => {
-    const saved = await AsyncStorage.getItem('current_admin');
-    if (saved) setAdmin(JSON.parse(saved));
-  };
-
+  const loadAdmin = async () => { const saved = await AsyncStorage.getItem('current_admin'); if (saved) setAdmin(JSON.parse(saved)); };
   const loadStats = async () => {
-    const students = await getAllStudents();
-    const lecturers = await getAllLecturers();
-    const venues = await getAllVenues();
+    const students = await getAllStudents(); const lecturers = await getAllLecturers(); const venues = await getAllVenues();
     if (students.success) setStudentCount(students.students.length);
     if (lecturers.success) setLecturerCount(lecturers.lecturers.length);
     if (venues.success) setVenueCount(venues.venues.length);
   };
-
-  const checkNotifications = async () => {
-    const { count } = await supabase.from('notifications').select('*', { count: 'exact', head: true }).eq('is_read', 0);
-    setHasNotif((count || 0) > 0);
-  };
-
-  const handleLogout = async () => {
-    await AsyncStorage.removeItem('current_admin');
-    router.replace('/');
-  };
-
-  const handleShare = async () => {
-    await Share.share({ message: 'Check out Campus IQ — the smart campus companion for MSU!', title: 'Campus IQ - MSU' });
-  };
-
-  const getTimeGreeting = () => {
-    const hour = new Date().getHours();
-    if (hour < 12) return 'Good morning';
-    if (hour < 17) return 'Good afternoon';
-    return 'Good evening';
-  };
+  const checkNotifications = async () => { const { count } = await supabase.from('notifications').select('*', { count: 'exact', head: true }).eq('is_read', 0); setHasNotif((count || 0) > 0); };
+  const handleLogout = async () => { await AsyncStorage.removeItem('current_admin'); router.replace('/'); };
+  const handleShare = async () => { await Share.share({ message: 'Check out Campus IQ — the smart campus companion for MSU!', title: 'Campus IQ - MSU' }); };
+  const getTimeGreeting = () => { const h = new Date().getHours(); if (h < 12) return 'Good morning'; if (h < 17) return 'Good afternoon'; return 'Good evening'; };
 
   return (
     <ScrollView style={styles.container}>
@@ -289,111 +82,50 @@ export default function AdminHome() {
 
       <Text style={styles.sectionTitle}>User Management</Text>
       <View style={styles.row}>
-        <TouchableOpacity style={[styles.card, styles.green]} onPress={() => router.push('/manage-users')}>
-          <AnimatedPeopleCircle />
-          <Text style={styles.cardTitle}>Manage Users</Text>
-          <Text style={styles.cardSub}>Search & edit</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.card, styles.green]} onPress={() => router.push('/add-lecturer')}>
-          <AnimatedPersonAdd />
-          <Text style={styles.cardTitle}>Add Lecturer</Text>
-          <Text style={styles.cardSub}>Create account</Text>
-        </TouchableOpacity>
+        <TouchableOpacity style={[styles.card, styles.green]} onPress={() => router.push('/manage-users')}><AnimatedPeopleCircle /><Text style={styles.cardTitle}>Manage Users</Text><Text style={styles.cardSub}>Search & edit</Text></TouchableOpacity>
+        <TouchableOpacity style={[styles.card, styles.green]} onPress={() => router.push('/add-lecturer')}><AnimatedPersonAdd /><Text style={styles.cardTitle}>Add Lecturer</Text><Text style={styles.cardSub}>Create account</Text></TouchableOpacity>
       </View>
       <View style={styles.row}>
-        <TouchableOpacity style={[styles.card, styles.green]} onPress={() => router.push('/all-students')}>
-          <AnimatedPerson />
-          <Text style={styles.cardTitle}>All Students</Text>
-          <Text style={styles.cardSub}>View accounts</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.card, styles.green]} onPress={() => router.push('/suspend-user')}>
-          <AnimatedBan />
-          <Text style={styles.cardTitle}>Suspend User</Text>
-          <Text style={styles.cardSub}>Block access</Text>
-        </TouchableOpacity>
+        <TouchableOpacity style={[styles.card, styles.green]} onPress={() => router.push('/all-students')}><AnimatedPerson /><Text style={styles.cardTitle}>All Students</Text><Text style={styles.cardSub}>View accounts</Text></TouchableOpacity>
+        <TouchableOpacity style={[styles.card, styles.green]} onPress={() => router.push('/suspend-user')}><AnimatedBan /><Text style={styles.cardTitle}>Suspend User</Text><Text style={styles.cardSub}>Block access</Text></TouchableOpacity>
       </View>
 
       <Text style={styles.sectionTitle}>Academic Management</Text>
       <View style={styles.row}>
-        <TouchableOpacity style={[styles.card, styles.purple]} onPress={() => router.push('/manage-timetable')}>
-          <AnimatedCalendar />
-          <Text style={styles.cardTitle}>Timetables</Text>
-          <Text style={styles.cardSub}>Create and publish</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.card, styles.purple]} onPress={() => router.push('/manage-venues')}>
-          <AnimatedLocation />
-          <Text style={styles.cardTitle}>Venues</Text>
-          <Text style={styles.cardSub}>Manage rooms</Text>
-        </TouchableOpacity>
+        <TouchableOpacity style={[styles.card, styles.purple]} onPress={() => router.push('/manage-timetable')}><AnimatedCalendar /><Text style={styles.cardTitle}>Timetables</Text><Text style={styles.cardSub}>Create and publish</Text></TouchableOpacity>
+        <TouchableOpacity style={[styles.card, styles.purple]} onPress={() => router.push('/manage-venues')}><AnimatedLocation /><Text style={styles.cardTitle}>Venues</Text><Text style={styles.cardSub}>Manage rooms</Text></TouchableOpacity>
       </View>
 
       <Text style={styles.sectionTitle}>Communication & Reports</Text>
       <View style={styles.row}>
-        <TouchableOpacity style={[styles.card, styles.orange]} onPress={() => router.push('/broadcast')}>
-          <AnimatedMegaphone />
-          <Text style={styles.cardTitle}>Broadcast</Text>
-          <Text style={styles.cardSub}>Notify all users</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.card, styles.orange]} onPress={() => router.push('/anonymous-report')}>
-          <AnimatedShield />
-          <Text style={styles.cardTitle}>Anon Reports</Text>
-          <Text style={styles.cardSub}>Student reports</Text>
-        </TouchableOpacity>
+        <TouchableOpacity style={[styles.card, styles.orange]} onPress={() => router.push('/broadcast')}><AnimatedMegaphone /><Text style={styles.cardTitle}>Broadcast</Text><Text style={styles.cardSub}>Notify all users</Text></TouchableOpacity>
+        <TouchableOpacity style={[styles.card, styles.orange]} onPress={() => router.push('/anonymous-report')}><AnimatedShield /><Text style={styles.cardTitle}>Anon Reports</Text><Text style={styles.cardSub}>Student reports</Text></TouchableOpacity>
       </View>
 
       <Text style={styles.sectionTitle}>Campus Tools</Text>
       <View style={styles.row}>
-        <TouchableOpacity style={[styles.card, styles.dark]} onPress={() => router.push('/lost-found')}>
-          <AnimatedSearch />
-          <Text style={styles.cardTitle}>Lost & Found</Text>
-          <Text style={styles.cardSub}>Manage items</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.card, styles.dark]} onPress={() => router.push('/src-elections')}>
-          <AnimatedPeople />
-          <Text style={styles.cardTitle}>SRC Elections</Text>
-          <Text style={styles.cardSub}>Manage voting</Text>
-        </TouchableOpacity>
+        <TouchableOpacity style={[styles.card, styles.dark]} onPress={() => router.push('/lost-found')}><AnimatedSearch /><Text style={styles.cardTitle}>Lost & Found</Text><Text style={styles.cardSub}>Manage items</Text></TouchableOpacity>
+        <TouchableOpacity style={[styles.card, styles.dark]} onPress={() => router.push('/src-elections')}><AnimatedPeople /><Text style={styles.cardTitle}>SRC Elections</Text><Text style={styles.cardSub}>Manage voting</Text></TouchableOpacity>
       </View>
       <View style={styles.row}>
-        <TouchableOpacity style={[styles.card, styles.dark]} onPress={() => router.push('/analytics')}>
-          <AnimatedBarChart />
-          <Text style={styles.cardTitle}>Analytics</Text>
-          <Text style={styles.cardSub}>Usage reports</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.card, styles.dark]} onPress={() => router.push('/app-settings')}>
-          <AnimatedSettings />
-          <Text style={styles.cardTitle}>Settings</Text>
-          <Text style={styles.cardSub}>App config</Text>
-        </TouchableOpacity>
+        <TouchableOpacity style={[styles.card, styles.dark]} onPress={() => router.push('/analytics')}><AnimatedBarChart /><Text style={styles.cardTitle}>Analytics</Text><Text style={styles.cardSub}>Usage reports</Text></TouchableOpacity>
+        <TouchableOpacity style={[styles.card, styles.dark]} onPress={() => router.push('/app-settings')}><AnimatedSettings /><Text style={styles.cardTitle}>Settings</Text><Text style={styles.cardSub}>App config</Text></TouchableOpacity>
       </View>
       <View style={styles.row}>
-        <TouchableOpacity style={[styles.card, styles.dark]} onPress={() => router.push('/msu-radio')}>
-          <AnimatedRadio />
-          <Text style={styles.cardTitle}>MSU Radio</Text>
-          <Text style={styles.cardSub}>Listen live</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.card, styles.dark]} onPress={() => { router.push('/notifications'); setHasNotif(false); }}>
-          <AnimatedBell hasNotif={hasNotif} />
-          <Text style={styles.cardTitle}>Notifications</Text>
-          <Text style={styles.cardSub}>Updates</Text>
-        </TouchableOpacity>
+        <TouchableOpacity style={[styles.card, styles.dark]} onPress={() => router.push('/msu-radio')}><AnimatedRadio /><Text style={styles.cardTitle}>MSU Radio</Text><Text style={styles.cardSub}>Listen live</Text></TouchableOpacity>
+        <TouchableOpacity style={[styles.card, styles.dark]} onPress={() => { router.push('/notifications'); setHasNotif(false); }}><AnimatedBell hasNotif={hasNotif} /><Text style={styles.cardTitle}>Notifications</Text><Text style={styles.cardSub}>Updates</Text></TouchableOpacity>
       </View>
       <View style={styles.row}>
-        <TouchableOpacity style={[styles.card, styles.dark]} onPress={() => router.push('/campus-map')}>
-          <AnimatedMap />
-          <Text style={styles.cardTitle}>Campus Map</Text>
-          <Text style={styles.cardSub}>Navigate campus</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.card, styles.dark]} onPress={handleShare}>
-          <AnimatedShare />
-          <Text style={styles.cardTitle}>Share App</Text>
-          <Text style={styles.cardSub}>Invite others</Text>
-        </TouchableOpacity>
+        <TouchableOpacity style={[styles.card, styles.dark]} onPress={() => router.push('/campus-map')}><AnimatedMap /><Text style={styles.cardTitle}>Campus Map</Text><Text style={styles.cardSub}>Navigate campus</Text></TouchableOpacity>
+        <TouchableOpacity style={[styles.card, styles.dark]} onPress={handleShare}><AnimatedShare /><Text style={styles.cardTitle}>Share App</Text><Text style={styles.cardSub}>Invite others</Text></TouchableOpacity>
+      </View>
+      <View style={styles.row}>
+        <TouchableOpacity style={[styles.card, { backgroundColor: '#3d1a0a', borderWidth: 1, borderColor: '#D85A30' }]} onPress={() => router.push('/emergency-services')}><AnimatedMedical /><Text style={styles.cardTitle}>Emergency</Text><Text style={styles.cardSub}>Campus services</Text></TouchableOpacity>
+        <View style={[styles.card, { backgroundColor: 'transparent', borderWidth: 0 }]} />
       </View>
 
       <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
-        <Ionicons name="log-out-outline" size={20} color="#ffaaaa" />
-        <Text style={styles.logoutText}>Logout</Text>
+        <Ionicons name="log-out-outline" size={20} color="#ffaaaa" /><Text style={styles.logoutText}>Logout</Text>
       </TouchableOpacity>
     </ScrollView>
   );
