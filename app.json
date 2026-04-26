@@ -15,7 +15,8 @@
       "adaptiveIcon": {
         "backgroundColor": "#1a1650",
         "foregroundImage": "./assets/images/image_8906d951.png"
-      }
+      },
+      "package": "com.paneinyasha.CampusIQ"
     },
     "plugins": [
       "expo-router",
@@ -23,6 +24,12 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "540b5e18-9605-43c1-a1db-8c4aac9adb18"
+      }
     }
   }
 }
