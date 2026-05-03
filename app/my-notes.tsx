@@ -33,7 +33,11 @@ export default function MyNotes() {
   const [docFile, setDocFile] = useState<any>(null);
   const [uploading, setUploading] = useState(false);
 
-  // Enroll fields
+  // Lecturer class picker
+  const [lecturerClasses, setLecturerClasses] = useState<any[]>([]);
+  const [showClassPicker, setShowClassPicker] = useState(false);
+
+  // Student enroll
   const [newCourse, setNewCourse] = useState('');
 
   useEffect(() => { loadUser(); }, []);
@@ -50,6 +54,7 @@ export default function MyNotes() {
       const l = JSON.parse(lecturer);
       setUser(l); setUserType('lecturer');
       loadLecturerDocs(l.id);
+      loadLecturerClasses(l.id);
     }
   };
 
@@ -81,6 +86,15 @@ export default function MyNotes() {
       .eq('lecturer_id', lecturerId)
       .order('created_at', { ascending: false });
     setLecturerDocs(data || []);
+  };
+
+  const loadLecturerClasses = async (lecturerId: string) => {
+    const { data } = await supabase
+      .from('classes')
+      .select('id, class_name, class_code')
+      .eq('lecturer_id', lecturerId)
+      .order('class_name');
+    setLecturerClasses(data || []);
   };
 
   const onRefresh = async () => {
@@ -115,7 +129,7 @@ export default function MyNotes() {
   };
 
   const uploadDoc = async () => {
-    if (!docTitle || !docCourse) { Alert.alert('Missing', 'Title and course name are required'); return; }
+    if (!docTitle || !docCourse) { Alert.alert('Missing', 'Title and class selection are required'); return; }
     setUploading(true);
     try {
       let fileUrl = '';
@@ -147,7 +161,7 @@ export default function MyNotes() {
       });
 
       if (error) throw error;
-      Alert.alert('✅ Uploaded!', 'Document uploaded successfully! Students enrolled in this course can see it.');
+      Alert.alert('Uploaded!', 'Document uploaded successfully! Students enrolled in this course can see it.');
       setDocTitle(''); setDocDesc(''); setDocCourse(''); setDocFile(null);
       loadLecturerDocs(user.id);
     } catch (e: any) {
@@ -158,10 +172,12 @@ export default function MyNotes() {
   const deleteDoc = (doc: any) => {
     Alert.alert('Delete Document', `Delete "${doc.title}"?`, [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: async () => {
-        await supabase.from('lecturer_docs').delete().eq('id', doc.id);
-        loadLecturerDocs(user.id);
-      }}
+      {
+        text: 'Delete', style: 'destructive', onPress: async () => {
+          await supabase.from('lecturer_docs').delete().eq('id', doc.id);
+          loadLecturerDocs(user.id);
+        }
+      }
     ]);
   };
 
@@ -182,10 +198,12 @@ export default function MyNotes() {
   const unenroll = (course: string) => {
     Alert.alert('Unenroll', `Remove ${course} from your courses?`, [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Remove', style: 'destructive', onPress: async () => {
-        await supabase.from('enrollments').delete().eq('student_id', user.id).eq('course_name', course);
-        loadEnrolledCourses(user.id);
-      }}
+      {
+        text: 'Remove', style: 'destructive', onPress: async () => {
+          await supabase.from('enrollments').delete().eq('student_id', user.id).eq('course_name', course);
+          loadEnrolledCourses(user.id);
+        }
+      }
     ]);
   };
 
@@ -204,7 +222,6 @@ export default function MyNotes() {
     return 'document-outline';
   };
 
-  // Base64 decode helper
   function decode(base64: string): Uint8Array {
     const binaryString = atob(base64);
     const bytes = new Uint8Array(binaryString.length);
@@ -266,7 +283,6 @@ export default function MyNotes() {
         contentContainerStyle={styles.content}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FFD700" />}
       >
-
         {/* STUDENT — MY NOTES */}
         {userType === 'student' && activeTab === 'personal' && (
           <>
@@ -339,7 +355,6 @@ export default function MyNotes() {
                     <Ionicons name="add" size={16} color="#534AB7" />
                   </TouchableOpacity>
                 </ScrollView>
-
                 <Text style={styles.sectionLabel}>Documents from Lecturers</Text>
                 {lecturerDocs.length === 0 ? (
                   <View style={styles.emptyBox}>
@@ -401,14 +416,19 @@ export default function MyNotes() {
         {userType === 'lecturer' && activeTab === 'upload' && (
           <View style={styles.uploadForm}>
             <Text style={styles.formTitle}>Upload Study Material</Text>
+
             <View style={styles.inputBox}>
               <Ionicons name="text-outline" size={18} color="#534AB7" style={styles.inputIcon} />
               <TextInput style={styles.input} placeholder="Document Title *" placeholderTextColor="#aaa" value={docTitle} onChangeText={setDocTitle} />
             </View>
-            <View style={styles.inputBox}>
-              <Ionicons name="book-outline" size={18} color="#534AB7" style={styles.inputIcon} />
-              <TextInput style={styles.input} placeholder="Course Name * (e.g. Database Systems)" placeholderTextColor="#aaa" value={docCourse} onChangeText={setDocCourse} />
-            </View>
+
+            {/* CLASS PICKER — replaces manual course name input */}
+            <TouchableOpacity style={styles.classPickerBtn} onPress={() => setShowClassPicker(true)}>
+              <Ionicons name="school-outline" size={18} color="#534AB7" style={styles.inputIcon} />
+              <Text style={[styles.input, !docCourse && { color: '#aaa' }]}>{docCourse || 'Select your class *'}</Text>
+              <Ionicons name="chevron-down" size={18} color="#a0c4ff" />
+            </TouchableOpacity>
+
             <TextInput
               style={[styles.input, styles.descInput]}
               placeholder="Description (optional)"
@@ -446,7 +466,43 @@ export default function MyNotes() {
         )}
       </ScrollView>
 
-      {/* Enroll Modal */}
+      {/* Class Picker Modal for lecturer */}
+      <Modal visible={showClassPicker} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalBox}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Select Class</Text>
+              <TouchableOpacity onPress={() => setShowClassPicker(false)}>
+                <Ionicons name="close" size={24} color="#fff" />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.modalSub}>Choose which class this document is for</Text>
+            {lecturerClasses.length === 0 ? (
+              <View style={styles.emptyBox}>
+                <Ionicons name="school-outline" size={50} color="#534AB7" />
+                <Text style={styles.emptyText}>No classes created yet. Go to Classroom to create a class first.</Text>
+              </View>
+            ) : (
+              lecturerClasses.map((c: any) => (
+                <TouchableOpacity
+                  key={c.id}
+                  style={[styles.classOption, docCourse === c.class_name && styles.classOptionActive]}
+                  onPress={() => { setDocCourse(c.class_name); setShowClassPicker(false); }}
+                >
+                  <Ionicons name="school-outline" size={20} color="#1D9E75" />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.classOptionName}>{c.class_name}</Text>
+                    <Text style={styles.classOptionCode}>{c.class_code}</Text>
+                  </View>
+                  {docCourse === c.class_name && <Ionicons name="checkmark-circle" size={20} color="#1D9E75" />}
+                </TouchableOpacity>
+              ))
+            )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* Student Enroll Modal */}
       <Modal visible={showEnrollModal} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modalBox}>
@@ -530,6 +586,7 @@ const styles = StyleSheet.create({
   docMeta: { fontSize: 11, color: '#7a9cc4' },
   deleteDocBtn: { padding: 6 },
   uploadForm: { backgroundColor: '#0a2a4a', borderWidth: 1, borderColor: '#534AB7', borderRadius: 16, padding: 16 },
+  classPickerBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#001f4d', borderWidth: 1, borderColor: '#534AB7', borderRadius: 10, padding: 12, marginBottom: 12 },
   filePicker: { backgroundColor: '#001f4d', borderWidth: 2, borderColor: '#534AB7', borderRadius: 12, borderStyle: 'dashed', minHeight: 120, marginBottom: 16, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
   filePickerInner: { alignItems: 'center', gap: 8, padding: 20 },
   filePickerSelected: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 16 },
@@ -539,10 +596,14 @@ const styles = StyleSheet.create({
   uploadBtn: { backgroundColor: '#534AB7', padding: 14, borderRadius: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
   uploadBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 15 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
-  modalBox: { backgroundColor: '#0a2a4a', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20 },
+  modalBox: { backgroundColor: '#0a2a4a', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, maxHeight: '80%' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
   modalTitle: { fontSize: 18, fontWeight: 'bold', color: '#FFD700' },
   modalSub: { fontSize: 13, color: '#a0c4ff', marginBottom: 14 },
+  classOption: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#001f4d', borderRadius: 12, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: '#534AB7' },
+  classOptionActive: { borderColor: '#1D9E75', backgroundColor: '#0a3d2e' },
+  classOptionName: { color: '#ffffff', fontWeight: 'bold', fontSize: 15 },
+  classOptionCode: { color: '#FFD700', fontSize: 12, marginTop: 2 },
   enrolledItem: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#001f4d', borderRadius: 10, padding: 12, marginBottom: 8 },
   enrolledItemText: { color: '#fff', fontSize: 14 },
 });

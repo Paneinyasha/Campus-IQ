@@ -7,14 +7,14 @@ export type AppThemeType = {
   isDark: boolean;
   fontSize: number;
   fontSizeLabel: string;
-  primaryColor: string;
+  themeName: string;
 };
 
 const defaultTheme: AppThemeType = {
   isDark: true,
   fontSize: 15,
   fontSizeLabel: 'Medium',
-  primaryColor: '#1D9E75',
+  themeName: 'dark',
 };
 
 export const ThemeContext = createContext<AppThemeType>(defaultTheme);
@@ -27,11 +27,12 @@ export const loadThemeSettings = async (): Promise<AppThemeType> => {
       const s = JSON.parse(saved);
       const fontMap: any = { small: 12, medium: 15, large: 18, xlarge: 21 };
       const labelMap: any = { small: 'Small', medium: 'Medium', large: 'Large', xlarge: 'Very Large' };
+      const themeName = s.theme || 'dark';
       return {
-        isDark: s.theme !== 'light',
+        isDark: themeName !== 'light',
         fontSize: fontMap[s.fontSize] || 15,
         fontSizeLabel: labelMap[s.fontSize] || 'Medium',
-        primaryColor: s.theme === 'green' ? '#1D9E75' : s.theme === 'purple' ? '#534AB7' : '#1D9E75',
+        themeName,
       };
     }
   } catch (e) {}
@@ -43,7 +44,7 @@ export default function RootLayout() {
 
   useEffect(() => {
     loadThemeSettings().then(setTheme);
-    const interval = setInterval(() => loadThemeSettings().then(setTheme), 1000);
+    const interval = setInterval(() => loadThemeSettings().then(setTheme), 800);
     return () => clearInterval(interval);
   }, []);
 
@@ -95,7 +96,7 @@ export default function RootLayout() {
         <Stack.Screen name="src-elections" />
         <Stack.Screen name="suspend-user" />
       </Stack>
-      <StatusBar style="light" />
+      <StatusBar style="auto" />
     </ThemeContext.Provider>
   );
 }
