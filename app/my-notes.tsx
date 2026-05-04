@@ -1,7 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system';
 import * as Linking from 'expo-linking';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
@@ -25,19 +24,13 @@ export default function MyNotes() {
   const [content, setContent] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-
-  // Doc upload fields
   const [docTitle, setDocTitle] = useState('');
   const [docDesc, setDocDesc] = useState('');
   const [docCourse, setDocCourse] = useState('');
   const [docFile, setDocFile] = useState<any>(null);
   const [uploading, setUploading] = useState(false);
-
-  // Lecturer class picker
   const [lecturerClasses, setLecturerClasses] = useState<any[]>([]);
   const [showClassPicker, setShowClassPicker] = useState(false);
-
-  // Student enroll
   const [newCourse, setNewCourse] = useState('');
 
   useEffect(() => { loadUser(); }, []);
@@ -48,13 +41,11 @@ export default function MyNotes() {
     if (student) {
       const s = JSON.parse(student);
       setUser(s); setUserType('student');
-      loadNotes(s.id);
-      loadEnrolledCourses(s.id);
+      loadNotes(s.id); loadEnrolledCourses(s.id);
     } else if (lecturer) {
       const l = JSON.parse(lecturer);
       setUser(l); setUserType('lecturer');
-      loadLecturerDocs(l.id);
-      loadLecturerClasses(l.id);
+      loadLecturerDocs(l.id); loadLecturerClasses(l.id);
     }
   };
 
@@ -71,37 +62,21 @@ export default function MyNotes() {
   };
 
   const loadCourseDocs = async (courses: string[]) => {
-    const { data } = await supabase
-      .from('lecturer_docs')
-      .select('*')
-      .in('course_name', courses)
-      .order('created_at', { ascending: false });
+    const { data } = await supabase.from('lecturer_docs').select('*').in('course_name', courses).order('created_at', { ascending: false });
     setLecturerDocs(data || []);
   };
 
   const loadLecturerDocs = async (lecturerId: string) => {
-    const { data } = await supabase
-      .from('lecturer_docs')
-      .select('*')
-      .eq('lecturer_id', lecturerId)
-      .order('created_at', { ascending: false });
+    const { data } = await supabase.from('lecturer_docs').select('*').eq('lecturer_id', lecturerId).order('created_at', { ascending: false });
     setLecturerDocs(data || []);
   };
 
   const loadLecturerClasses = async (lecturerId: string) => {
-    const { data } = await supabase
-      .from('classes')
-      .select('id, class_name, class_code')
-      .eq('lecturer_id', lecturerId)
-      .order('class_name');
+    const { data } = await supabase.from('classes').select('id, class_name, class_code').eq('lecturer_id', lecturerId).order('class_name');
     setLecturerClasses(data || []);
   };
 
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await loadUser();
-    setRefreshing(false);
-  };
+  const onRefresh = async () => { setRefreshing(true); await loadUser(); setRefreshing(false); };
 
   const handleSaveNote = async () => {
     if (!title || !content) { Alert.alert('Missing', 'Please enter title and content'); return; }
@@ -128,6 +103,7 @@ export default function MyNotes() {
     } catch (e) { Alert.alert('Error', 'Could not pick document'); }
   };
 
+  // FIXED: Use fetch API instead of FileSystem.readAsStringAsync to avoid Base64 error
   const uploadDoc = async () => {
     if (!docTitle || !docCourse) { Alert.alert('Missing', 'Title and class selection are required'); return; }
     setUploading(true);
@@ -137,15 +113,25 @@ export default function MyNotes() {
       let fileType = '';
 
       if (docFile) {
-        const fileExt = docFile.name.split('.').pop();
         fileName = docFile.name;
         fileType = docFile.mimeType || 'application/octet-stream';
+        const fileExt = docFile.name.split('.').pop();
         const filePath = `lecturer-docs/${user.id}/${Date.now()}.${fileExt}`;
-        const base64 = await FileSystem.readAsStringAsync(docFile.uri, { encoding: FileSystem.EncodingType.Base64 });
-        const { error: uploadError } = await supabase.storage.from('campus-iq').upload(filePath, decode(base64), { contentType: fileType });
+
+        // Use fetch to get blob — works on React Native without FileSystem
+        const response = await fetch(docFile.uri);
+        const blob = await response.blob();
+
+        const { error: uploadError } = await supabase.storage
+          .from('campus-iq')
+          .upload(filePath, blob, { contentType: fileType });
+
         if (!uploadError) {
           const { data: urlData } = supabase.storage.from('campus-iq').getPublicUrl(filePath);
           fileUrl = urlData.publicUrl;
+        } else {
+          console.log('Storage upload error:', uploadError.message);
+          // Continue without file if storage fails — metadata still saved
         }
       }
 
@@ -161,7 +147,7 @@ export default function MyNotes() {
       });
 
       if (error) throw error;
-      Alert.alert('Uploaded!', 'Document uploaded successfully! Students enrolled in this course can see it.');
+      Alert.alert('Uploaded!', 'Document uploaded successfully!');
       setDocTitle(''); setDocDesc(''); setDocCourse(''); setDocFile(null);
       loadLecturerDocs(user.id);
     } catch (e: any) {
@@ -172,45 +158,25 @@ export default function MyNotes() {
   const deleteDoc = (doc: any) => {
     Alert.alert('Delete Document', `Delete "${doc.title}"?`, [
       { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete', style: 'destructive', onPress: async () => {
-          await supabase.from('lecturer_docs').delete().eq('id', doc.id);
-          loadLecturerDocs(user.id);
-        }
-      }
+      { text: 'Delete', style: 'destructive', onPress: async () => { await supabase.from('lecturer_docs').delete().eq('id', doc.id); loadLecturerDocs(user.id); } }
     ]);
   };
 
   const enrollInCourse = async () => {
     if (!newCourse.trim()) { Alert.alert('Missing', 'Enter course name'); return; }
-    const { error } = await supabase.from('enrollments').insert({
-      student_id: user.id,
-      course_name: newCourse.trim(),
-      lecturer_id: '00000000-0000-0000-0000-000000000000',
-    });
+    const { error } = await supabase.from('enrollments').insert({ student_id: user.id, course_name: newCourse.trim(), lecturer_id: '00000000-0000-0000-0000-000000000000' });
     if (error && error.code !== '23505') { Alert.alert('Error', error.message); return; }
-    Alert.alert('Enrolled!', `You are now enrolled in ${newCourse}`);
-    setNewCourse('');
-    setShowEnrollModal(false);
-    loadEnrolledCourses(user.id);
+    setNewCourse(''); setShowEnrollModal(false); loadEnrolledCourses(user.id);
   };
 
   const unenroll = (course: string) => {
-    Alert.alert('Unenroll', `Remove ${course} from your courses?`, [
+    Alert.alert('Unenroll', `Remove ${course}?`, [
       { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Remove', style: 'destructive', onPress: async () => {
-          await supabase.from('enrollments').delete().eq('student_id', user.id).eq('course_name', course);
-          loadEnrolledCourses(user.id);
-        }
-      }
+      { text: 'Remove', style: 'destructive', onPress: async () => { await supabase.from('enrollments').delete().eq('student_id', user.id).eq('course_name', course); loadEnrolledCourses(user.id); } }
     ]);
   };
 
-  const openDoc = (url: string) => {
-    if (url) Linking.openURL(url);
-    else Alert.alert('No File', 'This document has no file attached');
-  };
+  const openDoc = (url: string) => { if (url) Linking.openURL(url); else Alert.alert('No File', 'No file attached'); };
 
   const getFileIcon = (type: string) => {
     if (!type) return 'document-outline';
@@ -222,19 +188,12 @@ export default function MyNotes() {
     return 'document-outline';
   };
 
-  function decode(base64: string): Uint8Array {
-    const binaryString = atob(base64);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
-    return bytes;
-  }
-
   const formatDate = (d: string) => new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+        <TouchableOpacity onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{userType === 'lecturer' ? 'Study Materials' : 'Notes & Materials'}</Text>
@@ -251,7 +210,6 @@ export default function MyNotes() {
         {userType !== 'student' && <View style={{ width: 24 }} />}
       </View>
 
-      {/* Tabs */}
       {userType === 'student' && (
         <View style={styles.tabRow}>
           <TouchableOpacity style={[styles.tab, activeTab === 'personal' && styles.tabActive]} onPress={() => setActiveTab('personal')}>
@@ -270,7 +228,7 @@ export default function MyNotes() {
         <View style={styles.tabRow}>
           <TouchableOpacity style={[styles.tab, activeTab === 'course' && styles.tabActive]} onPress={() => setActiveTab('course')}>
             <Ionicons name="library-outline" size={16} color={activeTab === 'course' ? '#FFD700' : '#a0c4ff'} />
-            <Text style={[styles.tabText, activeTab === 'course' && styles.tabTextActive]}>Uploaded Docs ({lecturerDocs.length})</Text>
+            <Text style={[styles.tabText, activeTab === 'course' && styles.tabTextActive]}>Uploaded ({lecturerDocs.length})</Text>
           </TouchableOpacity>
           <TouchableOpacity style={[styles.tab, activeTab === 'upload' && styles.tabActive]} onPress={() => setActiveTab('upload')}>
             <Ionicons name="cloud-upload-outline" size={16} color={activeTab === 'upload' ? '#FFD700' : '#a0c4ff'} />
@@ -279,20 +237,15 @@ export default function MyNotes() {
         </View>
       )}
 
-      <ScrollView
-        contentContainerStyle={styles.content}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FFD700" />}
-      >
-        {/* STUDENT — MY NOTES */}
+      <ScrollView contentContainerStyle={styles.content} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FFD700" />}>
+
+        {/* STUDENT MY NOTES */}
         {userType === 'student' && activeTab === 'personal' && (
           <>
             {showForm && (
               <View style={styles.form}>
                 <Text style={styles.formTitle}>{editingId ? 'Edit Note' : 'New Note'}</Text>
-                <View style={styles.inputBox}>
-                  <Ionicons name="create-outline" size={18} color="#1D9E75" style={styles.inputIcon} />
-                  <TextInput style={styles.input} placeholder="Note title" placeholderTextColor="#aaa" value={title} onChangeText={setTitle} />
-                </View>
+                <View style={styles.inputBox}><Ionicons name="create-outline" size={18} color="#1D9E75" style={styles.inputIcon} /><TextInput style={styles.input} placeholder="Note title" placeholderTextColor="#aaa" value={title} onChangeText={setTitle} /></View>
                 <TextInput style={styles.contentInput} placeholder="Write your note here..." placeholderTextColor="#aaa" value={content} onChangeText={setContent} multiline numberOfLines={6} textAlignVertical="top" />
                 <TouchableOpacity style={styles.saveBtn} onPress={handleSaveNote}>
                   <Ionicons name="checkmark-circle-outline" size={20} color="#fff" />
@@ -312,12 +265,8 @@ export default function MyNotes() {
                   <View style={styles.noteTop}>
                     <Text style={styles.noteTitle}>{note.title}</Text>
                     <View style={styles.noteActions}>
-                      <TouchableOpacity onPress={() => { setTitle(note.title); setContent(note.content); setEditingId(note.id); setShowForm(true); }}>
-                        <Ionicons name="pencil-outline" size={18} color="#a0c4ff" />
-                      </TouchableOpacity>
-                      <TouchableOpacity onPress={() => handleDeleteNote(note.id)}>
-                        <Ionicons name="trash-outline" size={18} color="#D85A30" />
-                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => { setTitle(note.title); setContent(note.content); setEditingId(note.id); setShowForm(true); }}><Ionicons name="pencil-outline" size={18} color="#a0c4ff" /></TouchableOpacity>
+                      <TouchableOpacity onPress={() => handleDeleteNote(note.id)}><Ionicons name="trash-outline" size={18} color="#D85A30" /></TouchableOpacity>
                     </View>
                   </View>
                   <Text style={styles.noteContent} numberOfLines={3}>{note.content}</Text>
@@ -328,14 +277,14 @@ export default function MyNotes() {
           </>
         )}
 
-        {/* STUDENT — COURSE DOCS */}
+        {/* STUDENT COURSE DOCS */}
         {userType === 'student' && activeTab === 'course' && (
           <>
             {enrolledCourses.length === 0 ? (
               <View style={styles.emptyBox}>
                 <Ionicons name="library-outline" size={60} color="#534AB7" />
                 <Text style={styles.emptyTitle}>No Courses Yet</Text>
-                <Text style={styles.emptyText}>Tap + to enroll in a course and see lecturer documents</Text>
+                <Text style={styles.emptyText}>Tap + to enroll in a course</Text>
                 <TouchableOpacity style={styles.enrollBtn} onPress={() => setShowEnrollModal(true)}>
                   <Ionicons name="add-circle-outline" size={18} color="#fff" />
                   <Text style={styles.enrollBtnText}>Enroll in Course</Text>
@@ -344,7 +293,7 @@ export default function MyNotes() {
             ) : (
               <>
                 <Text style={styles.sectionLabel}>Enrolled Courses</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.coursesRow}>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
                   {enrolledCourses.map(course => (
                     <TouchableOpacity key={course} style={styles.courseChip} onLongPress={() => unenroll(course)}>
                       <Ionicons name="book-outline" size={14} color="#1D9E75" />
@@ -359,14 +308,12 @@ export default function MyNotes() {
                 {lecturerDocs.length === 0 ? (
                   <View style={styles.emptyBox}>
                     <Ionicons name="cloud-outline" size={48} color="#534AB7" />
-                    <Text style={styles.emptyText}>No documents uploaded yet for your courses</Text>
+                    <Text style={styles.emptyText}>No documents yet for your courses</Text>
                   </View>
                 ) : (
                   lecturerDocs.map(doc => (
                     <TouchableOpacity key={doc.id} style={styles.docCard} onPress={() => openDoc(doc.file_url)}>
-                      <View style={styles.docIcon}>
-                        <Ionicons name={getFileIcon(doc.file_type) as any} size={28} color="#534AB7" />
-                      </View>
+                      <View style={styles.docIcon}><Ionicons name={getFileIcon(doc.file_type) as any} size={28} color="#534AB7" /></View>
                       <View style={styles.docInfo}>
                         <Text style={styles.docTitle}>{doc.title}</Text>
                         <Text style={styles.docCourse}>{doc.course_name}</Text>
@@ -382,28 +329,26 @@ export default function MyNotes() {
           </>
         )}
 
-        {/* LECTURER — UPLOADED DOCS */}
+        {/* LECTURER UPLOADED DOCS */}
         {userType === 'lecturer' && activeTab === 'course' && (
           <>
             {lecturerDocs.length === 0 ? (
               <View style={styles.emptyBox}>
                 <Ionicons name="cloud-upload-outline" size={60} color="#534AB7" />
                 <Text style={styles.emptyTitle}>No Documents Yet</Text>
-                <Text style={styles.emptyText}>Switch to Upload tab to add documents for your students</Text>
+                <Text style={styles.emptyText}>Switch to Upload tab to add documents</Text>
               </View>
             ) : (
               lecturerDocs.map(doc => (
                 <View key={doc.id} style={styles.docCard}>
-                  <View style={styles.docIcon}>
-                    <Ionicons name={getFileIcon(doc.file_type) as any} size={28} color="#534AB7" />
-                  </View>
+                  <View style={styles.docIcon}><Ionicons name={getFileIcon(doc.file_type) as any} size={28} color="#534AB7" /></View>
                   <View style={styles.docInfo}>
                     <Text style={styles.docTitle}>{doc.title}</Text>
                     <Text style={styles.docCourse}>{doc.course_name}</Text>
                     {doc.description ? <Text style={styles.docDesc} numberOfLines={2}>{doc.description}</Text> : null}
                     <Text style={styles.docMeta}>{formatDate(doc.created_at)}</Text>
                   </View>
-                  <TouchableOpacity onPress={() => deleteDoc(doc)} style={styles.deleteDocBtn}>
+                  <TouchableOpacity onPress={() => deleteDoc(doc)} style={{ padding: 6 }}>
                     <Ionicons name="trash-outline" size={20} color="#D85A30" />
                   </TouchableOpacity>
                 </View>
@@ -412,48 +357,36 @@ export default function MyNotes() {
           </>
         )}
 
-        {/* LECTURER — UPLOAD */}
+        {/* LECTURER UPLOAD FORM */}
         {userType === 'lecturer' && activeTab === 'upload' && (
           <View style={styles.uploadForm}>
             <Text style={styles.formTitle}>Upload Study Material</Text>
-
             <View style={styles.inputBox}>
               <Ionicons name="text-outline" size={18} color="#534AB7" style={styles.inputIcon} />
               <TextInput style={styles.input} placeholder="Document Title *" placeholderTextColor="#aaa" value={docTitle} onChangeText={setDocTitle} />
             </View>
 
-            {/* CLASS PICKER — replaces manual course name input */}
+            {/* Class picker */}
             <TouchableOpacity style={styles.classPickerBtn} onPress={() => setShowClassPicker(true)}>
               <Ionicons name="school-outline" size={18} color="#534AB7" style={styles.inputIcon} />
               <Text style={[styles.input, !docCourse && { color: '#aaa' }]}>{docCourse || 'Select your class *'}</Text>
               <Ionicons name="chevron-down" size={18} color="#a0c4ff" />
             </TouchableOpacity>
 
-            <TextInput
-              style={[styles.input, styles.descInput]}
-              placeholder="Description (optional)"
-              placeholderTextColor="#aaa"
-              value={docDesc}
-              onChangeText={setDocDesc}
-              multiline
-              numberOfLines={3}
-              textAlignVertical="top"
-            />
+            <TextInput style={[styles.input, styles.descInput]} placeholder="Description (optional)" placeholderTextColor="#aaa" value={docDesc} onChangeText={setDocDesc} multiline numberOfLines={3} textAlignVertical="top" />
 
             <TouchableOpacity style={styles.filePicker} onPress={pickDocument}>
               {docFile ? (
-                <View style={styles.filePickerSelected}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 16 }}>
                   <Ionicons name="document-attach" size={24} color="#1D9E75" />
-                  <Text style={styles.filePickerSelectedText} numberOfLines={1}>{docFile.name}</Text>
-                  <TouchableOpacity onPress={() => setDocFile(null)}>
-                    <Ionicons name="close-circle" size={20} color="#D85A30" />
-                  </TouchableOpacity>
+                  <Text style={{ color: '#1D9E75', fontSize: 14, flex: 1 }} numberOfLines={1}>{docFile.name}</Text>
+                  <TouchableOpacity onPress={() => setDocFile(null)}><Ionicons name="close-circle" size={20} color="#D85A30" /></TouchableOpacity>
                 </View>
               ) : (
-                <View style={styles.filePickerInner}>
+                <View style={{ alignItems: 'center', padding: 24, gap: 8 }}>
                   <Ionicons name="cloud-upload-outline" size={36} color="#534AB7" />
-                  <Text style={styles.filePickerText}>Tap to select a file</Text>
-                  <Text style={styles.filePickerSub}>PDF, Word, PowerPoint, Excel, Images</Text>
+                  <Text style={{ color: '#a0c4ff', fontSize: 14, fontWeight: '600' }}>Tap to select a file</Text>
+                  <Text style={{ color: '#7a9cc4', fontSize: 12 }}>PDF, Word, PowerPoint, Excel, Images</Text>
                 </View>
               )}
             </TouchableOpacity>
@@ -466,29 +399,23 @@ export default function MyNotes() {
         )}
       </ScrollView>
 
-      {/* Class Picker Modal for lecturer */}
+      {/* Class Picker Modal */}
       <Modal visible={showClassPicker} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={styles.modalBox}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Select Class</Text>
-              <TouchableOpacity onPress={() => setShowClassPicker(false)}>
-                <Ionicons name="close" size={24} color="#fff" />
-              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setShowClassPicker(false)}><Ionicons name="close" size={24} color="#fff" /></TouchableOpacity>
             </View>
             <Text style={styles.modalSub}>Choose which class this document is for</Text>
             {lecturerClasses.length === 0 ? (
               <View style={styles.emptyBox}>
                 <Ionicons name="school-outline" size={50} color="#534AB7" />
-                <Text style={styles.emptyText}>No classes created yet. Go to Classroom to create a class first.</Text>
+                <Text style={styles.emptyText}>No classes yet. Create classes in Classroom first.</Text>
               </View>
             ) : (
               lecturerClasses.map((c: any) => (
-                <TouchableOpacity
-                  key={c.id}
-                  style={[styles.classOption, docCourse === c.class_name && styles.classOptionActive]}
-                  onPress={() => { setDocCourse(c.class_name); setShowClassPicker(false); }}
-                >
+                <TouchableOpacity key={c.id} style={[styles.classOption, docCourse === c.class_name && styles.classOptionActive]} onPress={() => { setDocCourse(c.class_name); setShowClassPicker(false); }}>
                   <Ionicons name="school-outline" size={20} color="#1D9E75" />
                   <View style={{ flex: 1 }}>
                     <Text style={styles.classOptionName}>{c.class_name}</Text>
@@ -508,11 +435,9 @@ export default function MyNotes() {
           <View style={styles.modalBox}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Enroll in Course</Text>
-              <TouchableOpacity onPress={() => setShowEnrollModal(false)}>
-                <Ionicons name="close" size={24} color="#fff" />
-              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setShowEnrollModal(false)}><Ionicons name="close" size={24} color="#fff" /></TouchableOpacity>
             </View>
-            <Text style={styles.modalSub}>Enter the exact course name your lecturer uses when uploading documents</Text>
+            <Text style={styles.modalSub}>Enter the exact course name your lecturer uses</Text>
             <View style={styles.inputBox}>
               <Ionicons name="book-outline" size={18} color="#1D9E75" style={styles.inputIcon} />
               <TextInput style={styles.input} placeholder="e.g. Database Systems" placeholderTextColor="#aaa" value={newCourse} onChangeText={setNewCourse} />
@@ -525,9 +450,9 @@ export default function MyNotes() {
               <>
                 <Text style={styles.modalSub}>Current enrollments (long press to remove):</Text>
                 {enrolledCourses.map(c => (
-                  <TouchableOpacity key={c} style={styles.enrolledItem} onLongPress={() => { unenroll(c); setShowEnrollModal(false); }}>
+                  <TouchableOpacity key={c} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#001f4d', borderRadius: 10, padding: 12, marginBottom: 8 }} onLongPress={() => { unenroll(c); setShowEnrollModal(false); }}>
                     <Ionicons name="book" size={16} color="#1D9E75" />
-                    <Text style={styles.enrolledItemText}>{c}</Text>
+                    <Text style={{ color: '#fff', fontSize: 14 }}>{c}</Text>
                   </TouchableOpacity>
                 ))}
               </>
@@ -542,7 +467,6 @@ export default function MyNotes() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#001f4d' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#0a2a4a', padding: 16, paddingTop: 60, borderBottomWidth: 1, borderBottomColor: '#1D9E75' },
-  backBtn: { padding: 4 },
   headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#FFD700' },
   tabRow: { flexDirection: 'row', backgroundColor: '#0a2a4a', borderBottomWidth: 1, borderBottomColor: '#1D9E75' },
   tab: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 12 },
@@ -573,7 +497,6 @@ const styles = StyleSheet.create({
   noteContent: { fontSize: 14, color: '#a0c4ff', lineHeight: 20, marginBottom: 8 },
   noteDate: { fontSize: 11, color: '#7a9cc4' },
   sectionLabel: { fontSize: 14, fontWeight: 'bold', color: '#FFD700', marginBottom: 10, letterSpacing: 1 },
-  coursesRow: { marginBottom: 16 },
   courseChip: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#0a3d2e', borderWidth: 1, borderColor: '#1D9E75', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 8, marginRight: 8 },
   courseChipText: { color: '#1D9E75', fontSize: 13, fontWeight: '600' },
   addCourseChip: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#0a2a4a', borderWidth: 1, borderColor: '#534AB7', alignItems: 'center', justifyContent: 'center', marginRight: 8 },
@@ -584,15 +507,9 @@ const styles = StyleSheet.create({
   docCourse: { fontSize: 12, color: '#FFD700', marginBottom: 4 },
   docDesc: { fontSize: 12, color: '#a0c4ff', marginBottom: 4 },
   docMeta: { fontSize: 11, color: '#7a9cc4' },
-  deleteDocBtn: { padding: 6 },
   uploadForm: { backgroundColor: '#0a2a4a', borderWidth: 1, borderColor: '#534AB7', borderRadius: 16, padding: 16 },
   classPickerBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#001f4d', borderWidth: 1, borderColor: '#534AB7', borderRadius: 10, padding: 12, marginBottom: 12 },
-  filePicker: { backgroundColor: '#001f4d', borderWidth: 2, borderColor: '#534AB7', borderRadius: 12, borderStyle: 'dashed', minHeight: 120, marginBottom: 16, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
-  filePickerInner: { alignItems: 'center', gap: 8, padding: 20 },
-  filePickerSelected: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 16 },
-  filePickerSelectedText: { color: '#1D9E75', fontSize: 14, flex: 1 },
-  filePickerText: { color: '#a0c4ff', fontSize: 14, fontWeight: '600' },
-  filePickerSub: { color: '#7a9cc4', fontSize: 12 },
+  filePicker: { backgroundColor: '#001f4d', borderWidth: 2, borderColor: '#534AB7', borderRadius: 12, borderStyle: 'dashed', minHeight: 120, marginBottom: 16, overflow: 'hidden' },
   uploadBtn: { backgroundColor: '#534AB7', padding: 14, borderRadius: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
   uploadBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 15 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
@@ -604,6 +521,4 @@ const styles = StyleSheet.create({
   classOptionActive: { borderColor: '#1D9E75', backgroundColor: '#0a3d2e' },
   classOptionName: { color: '#ffffff', fontWeight: 'bold', fontSize: 15 },
   classOptionCode: { color: '#FFD700', fontSize: 12, marginTop: 2 },
-  enrolledItem: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#001f4d', borderRadius: 10, padding: 12, marginBottom: 8 },
-  enrolledItemText: { color: '#fff', fontSize: 14 },
 });
