@@ -41,11 +41,13 @@ export default function MyNotes() {
     if (student) {
       const s = JSON.parse(student);
       setUser(s); setUserType('student');
-      loadNotes(s.id); loadEnrolledCourses(s.id);
+      loadNotes(s.id);
+      loadEnrolledCourses(s.id);
     } else if (lecturer) {
       const l = JSON.parse(lecturer);
       setUser(l); setUserType('lecturer');
-      loadLecturerDocs(l.id); loadLecturerClasses(l.id);
+      loadLecturerDocs(l.id);
+      loadLecturerClasses(l.id);
     }
   };
 
@@ -54,16 +56,59 @@ export default function MyNotes() {
     setNotes(data || []);
   };
 
+  // FIXED: Load from BOTH enrollments (manual) AND class_enrollments (via class code)
   const loadEnrolledCourses = async (sid: string) => {
-    const { data } = await supabase.from('enrollments').select('course_name').eq('student_id', sid);
-    const courses = (data || []).map((e: any) => e.course_name);
-    setEnrolledCourses(courses);
-    if (courses.length > 0) loadCourseDocs(courses);
+    try {
+      // Source 1: Manual enrollments by course name
+      const { data: enrollData } = await supabase
+        .from('enrollments')
+        .select('course_name')
+        .eq('student_id', sid);
+      const manualNames = (enrollData || []).map((e: any) => e.course_name).filter(Boolean);
+
+      // Source 2: Class enrollments via class code join
+      const { data: classEnrollData } = await supabase
+        .from('class_enrollments')
+        .select('class_id')
+        .eq('student_id', sid);
+
+      let classNames: string[] = [];
+      if (classEnrollData && classEnrollData.length > 0) {
+        const classIds = classEnrollData.map((e: any) => e.class_id).filter(Boolean);
+        if (classIds.length > 0) {
+          const { data: classData } = await supabase
+            .from('classes')
+            .select('class_name')
+            .in('id', classIds);
+          classNames = (classData || []).map((c: any) => c.class_name).filter(Boolean);
+        }
+      }
+
+      // Combine and deduplicate
+      const allCourses = [...new Set([...manualNames, ...classNames])];
+      setEnrolledCourses(allCourses);
+      if (allCourses.length > 0) {
+        loadCourseDocs(allCourses);
+      } else {
+        setLecturerDocs([]);
+      }
+    } catch (e) {
+      console.log('loadEnrolledCourses error:', e);
+    }
   };
 
+  // FIXED: Load docs for all enrolled course names
   const loadCourseDocs = async (courses: string[]) => {
-    const { data } = await supabase.from('lecturer_docs').select('*').in('course_name', courses).order('created_at', { ascending: false });
-    setLecturerDocs(data || []);
+    try {
+      if (!courses || courses.length === 0) { setLecturerDocs([]); return; }
+      const { data, error } = await supabase
+        .from('lecturer_docs')
+        .select('*')
+        .in('course_name', courses)
+        .order('created_at', { ascending: false });
+      if (error) { console.log('loadCourseDocs error:', error.message); return; }
+      setLecturerDocs(data || []);
+    } catch (e) {}
   };
 
   const loadLecturerDocs = async (lecturerId: string) => {
@@ -103,51 +148,38 @@ export default function MyNotes() {
     } catch (e) { Alert.alert('Error', 'Could not pick document'); }
   };
 
-  // FIXED: Use fetch API instead of FileSystem.readAsStringAsync to avoid Base64 error
   const uploadDoc = async () => {
     if (!docTitle || !docCourse) { Alert.alert('Missing', 'Title and class selection are required'); return; }
     setUploading(true);
     try {
       let fileUrl = '';
-      let fileName = '';
-      let fileType = '';
-
       if (docFile) {
-        fileName = docFile.name;
-        fileType = docFile.mimeType || 'application/octet-stream';
-        const fileExt = docFile.name.split('.').pop();
-        const filePath = `lecturer-docs/${user.id}/${Date.now()}.${fileExt}`;
-
-        // Use fetch to get blob — works on React Native without FileSystem
+        const ext = docFile.name?.split('.').pop() || 'pdf';
+        const filePath = `lecturer-docs/${user.id}/${Date.now()}.${ext}`;
         const response = await fetch(docFile.uri);
         const blob = await response.blob();
-
-        const { error: uploadError } = await supabase.storage
-          .from('campus-iq')
-          .upload(filePath, blob, { contentType: fileType });
-
+        const { error: uploadError } = await supabase.storage.from('campus-iq').upload(filePath, blob, { contentType: docFile.mimeType || 'application/octet-stream' });
         if (!uploadError) {
           const { data: urlData } = supabase.storage.from('campus-iq').getPublicUrl(filePath);
           fileUrl = urlData.publicUrl;
-        } else {
-          console.log('Storage upload error:', uploadError.message);
-          // Continue without file if storage fails — metadata still saved
         }
       }
 
-      const { error } = await supabase.from('lecturer_docs').insert({
+      const payload: any = {
         lecturer_id: user.id,
-        lecturer_name: `${user.name} ${user.surname}`,
-        title: docTitle,
-        description: docDesc,
+        lecturer_name: `${user.name} ${user.surname || ''}`.trim(),
+        title: docTitle.trim(),
         course_name: docCourse,
-        file_url: fileUrl || null,
-        file_name: fileName || null,
-        file_type: fileType || null,
-      });
+      };
+      if (docDesc.trim()) payload.description = docDesc.trim();
+      if (fileUrl) payload.file_url = fileUrl;
+      if (docFile?.name) payload.file_name = docFile.name;
+      if (docFile?.mimeType) payload.file_type = docFile.mimeType;
 
+      const { error } = await supabase.from('lecturer_docs').insert(payload);
       if (error) throw error;
-      Alert.alert('Uploaded!', 'Document uploaded successfully!');
+
+      Alert.alert('✅ Uploaded!', 'Document uploaded! Students in this class can now see it in their Course Docs tab.');
       setDocTitle(''); setDocDesc(''); setDocCourse(''); setDocFile(null);
       loadLecturerDocs(user.id);
     } catch (e: any) {
@@ -166,7 +198,8 @@ export default function MyNotes() {
     if (!newCourse.trim()) { Alert.alert('Missing', 'Enter course name'); return; }
     const { error } = await supabase.from('enrollments').insert({ student_id: user.id, course_name: newCourse.trim(), lecturer_id: '00000000-0000-0000-0000-000000000000' });
     if (error && error.code !== '23505') { Alert.alert('Error', error.message); return; }
-    setNewCourse(''); setShowEnrollModal(false); loadEnrolledCourses(user.id);
+    setNewCourse(''); setShowEnrollModal(false);
+    loadEnrolledCourses(user.id);
   };
 
   const unenroll = (course: string) => {
@@ -216,7 +249,10 @@ export default function MyNotes() {
             <Ionicons name="create-outline" size={16} color={activeTab === 'personal' ? '#FFD700' : '#a0c4ff'} />
             <Text style={[styles.tabText, activeTab === 'personal' && styles.tabTextActive]}>My Notes</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.tab, activeTab === 'course' && styles.tabActive]} onPress={() => setActiveTab('course')}>
+          <TouchableOpacity
+            style={[styles.tab, activeTab === 'course' && styles.tabActive]}
+            onPress={() => { setActiveTab('course'); if (user?.id) loadEnrolledCourses(user.id); }}
+          >
             <Ionicons name="library-outline" size={16} color={activeTab === 'course' ? '#FFD700' : '#a0c4ff'} />
             <Text style={[styles.tabText, activeTab === 'course' && styles.tabTextActive]}>Course Docs</Text>
             {lecturerDocs.length > 0 && <View style={styles.badge}><Text style={styles.badgeText}>{lecturerDocs.length}</Text></View>}
@@ -245,7 +281,10 @@ export default function MyNotes() {
             {showForm && (
               <View style={styles.form}>
                 <Text style={styles.formTitle}>{editingId ? 'Edit Note' : 'New Note'}</Text>
-                <View style={styles.inputBox}><Ionicons name="create-outline" size={18} color="#1D9E75" style={styles.inputIcon} /><TextInput style={styles.input} placeholder="Note title" placeholderTextColor="#aaa" value={title} onChangeText={setTitle} /></View>
+                <View style={styles.inputBox}>
+                  <Ionicons name="create-outline" size={18} color="#1D9E75" style={styles.inputIcon} />
+                  <TextInput style={styles.input} placeholder="Note title" placeholderTextColor="#aaa" value={title} onChangeText={setTitle} />
+                </View>
                 <TextInput style={styles.contentInput} placeholder="Write your note here..." placeholderTextColor="#aaa" value={content} onChangeText={setContent} multiline numberOfLines={6} textAlignVertical="top" />
                 <TouchableOpacity style={styles.saveBtn} onPress={handleSaveNote}>
                   <Ionicons name="checkmark-circle-outline" size={20} color="#fff" />
@@ -265,8 +304,12 @@ export default function MyNotes() {
                   <View style={styles.noteTop}>
                     <Text style={styles.noteTitle}>{note.title}</Text>
                     <View style={styles.noteActions}>
-                      <TouchableOpacity onPress={() => { setTitle(note.title); setContent(note.content); setEditingId(note.id); setShowForm(true); }}><Ionicons name="pencil-outline" size={18} color="#a0c4ff" /></TouchableOpacity>
-                      <TouchableOpacity onPress={() => handleDeleteNote(note.id)}><Ionicons name="trash-outline" size={18} color="#D85A30" /></TouchableOpacity>
+                      <TouchableOpacity onPress={() => { setTitle(note.title); setContent(note.content); setEditingId(note.id); setShowForm(true); }}>
+                        <Ionicons name="pencil-outline" size={18} color="#a0c4ff" />
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => handleDeleteNote(note.id)}>
+                        <Ionicons name="trash-outline" size={18} color="#D85A30" />
+                      </TouchableOpacity>
                     </View>
                   </View>
                   <Text style={styles.noteContent} numberOfLines={3}>{note.content}</Text>
@@ -284,15 +327,22 @@ export default function MyNotes() {
               <View style={styles.emptyBox}>
                 <Ionicons name="library-outline" size={60} color="#534AB7" />
                 <Text style={styles.emptyTitle}>No Courses Yet</Text>
-                <Text style={styles.emptyText}>Tap + to enroll in a course</Text>
+                <Text style={styles.emptyText}>
+                  Join a class using a class code (in My Classes) or tap + to enroll by course name
+                </Text>
                 <TouchableOpacity style={styles.enrollBtn} onPress={() => setShowEnrollModal(true)}>
                   <Ionicons name="add-circle-outline" size={18} color="#fff" />
-                  <Text style={styles.enrollBtnText}>Enroll in Course</Text>
+                  <Text style={styles.enrollBtnText}>Enroll by Course Name</Text>
                 </TouchableOpacity>
               </View>
             ) : (
               <>
-                <Text style={styles.sectionLabel}>Enrolled Courses</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                  <Text style={styles.sectionLabel}>Enrolled Courses ({enrolledCourses.length})</Text>
+                  <TouchableOpacity onPress={() => user?.id && loadEnrolledCourses(user.id)}>
+                    <Ionicons name="refresh-outline" size={18} color="#FFD700" />
+                  </TouchableOpacity>
+                </View>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
                   {enrolledCourses.map(course => (
                     <TouchableOpacity key={course} style={styles.courseChip} onLongPress={() => unenroll(course)}>
@@ -304,16 +354,22 @@ export default function MyNotes() {
                     <Ionicons name="add" size={16} color="#534AB7" />
                   </TouchableOpacity>
                 </ScrollView>
+
                 <Text style={styles.sectionLabel}>Documents from Lecturers</Text>
                 {lecturerDocs.length === 0 ? (
                   <View style={styles.emptyBox}>
                     <Ionicons name="cloud-outline" size={48} color="#534AB7" />
                     <Text style={styles.emptyText}>No documents yet for your courses</Text>
+                    <Text style={{ color: '#7a9cc4', fontSize: 12, textAlign: 'center', paddingHorizontal: 30, marginTop: 4 }}>
+                      Documents appear here when your lecturer uploads to one of your enrolled classes
+                    </Text>
                   </View>
                 ) : (
                   lecturerDocs.map(doc => (
                     <TouchableOpacity key={doc.id} style={styles.docCard} onPress={() => openDoc(doc.file_url)}>
-                      <View style={styles.docIcon}><Ionicons name={getFileIcon(doc.file_type) as any} size={28} color="#534AB7" /></View>
+                      <View style={styles.docIcon}>
+                        <Ionicons name={getFileIcon(doc.file_type) as any} size={28} color="#534AB7" />
+                      </View>
                       <View style={styles.docInfo}>
                         <Text style={styles.docTitle}>{doc.title}</Text>
                         <Text style={styles.docCourse}>{doc.course_name}</Text>
@@ -341,7 +397,9 @@ export default function MyNotes() {
             ) : (
               lecturerDocs.map(doc => (
                 <View key={doc.id} style={styles.docCard}>
-                  <View style={styles.docIcon}><Ionicons name={getFileIcon(doc.file_type) as any} size={28} color="#534AB7" /></View>
+                  <View style={styles.docIcon}>
+                    <Ionicons name={getFileIcon(doc.file_type) as any} size={28} color="#534AB7" />
+                  </View>
                   <View style={styles.docInfo}>
                     <Text style={styles.docTitle}>{doc.title}</Text>
                     <Text style={styles.docCourse}>{doc.course_name}</Text>
@@ -361,26 +419,37 @@ export default function MyNotes() {
         {userType === 'lecturer' && activeTab === 'upload' && (
           <View style={styles.uploadForm}>
             <Text style={styles.formTitle}>Upload Study Material</Text>
+
             <View style={styles.inputBox}>
               <Ionicons name="text-outline" size={18} color="#534AB7" style={styles.inputIcon} />
               <TextInput style={styles.input} placeholder="Document Title *" placeholderTextColor="#aaa" value={docTitle} onChangeText={setDocTitle} />
             </View>
 
-            {/* Class picker */}
             <TouchableOpacity style={styles.classPickerBtn} onPress={() => setShowClassPicker(true)}>
               <Ionicons name="school-outline" size={18} color="#534AB7" style={styles.inputIcon} />
               <Text style={[styles.input, !docCourse && { color: '#aaa' }]}>{docCourse || 'Select your class *'}</Text>
               <Ionicons name="chevron-down" size={18} color="#a0c4ff" />
             </TouchableOpacity>
 
-            <TextInput style={[styles.input, styles.descInput]} placeholder="Description (optional)" placeholderTextColor="#aaa" value={docDesc} onChangeText={setDocDesc} multiline numberOfLines={3} textAlignVertical="top" />
+            <TextInput
+              style={[styles.input, styles.descInput]}
+              placeholder="Description (optional)"
+              placeholderTextColor="#aaa"
+              value={docDesc}
+              onChangeText={setDocDesc}
+              multiline
+              numberOfLines={3}
+              textAlignVertical="top"
+            />
 
             <TouchableOpacity style={styles.filePicker} onPress={pickDocument}>
               {docFile ? (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 16 }}>
                   <Ionicons name="document-attach" size={24} color="#1D9E75" />
                   <Text style={{ color: '#1D9E75', fontSize: 14, flex: 1 }} numberOfLines={1}>{docFile.name}</Text>
-                  <TouchableOpacity onPress={() => setDocFile(null)}><Ionicons name="close-circle" size={20} color="#D85A30" /></TouchableOpacity>
+                  <TouchableOpacity onPress={() => setDocFile(null)}>
+                    <Ionicons name="close-circle" size={20} color="#D85A30" />
+                  </TouchableOpacity>
                 </View>
               ) : (
                 <View style={{ alignItems: 'center', padding: 24, gap: 8 }}>
@@ -405,9 +474,11 @@ export default function MyNotes() {
           <View style={styles.modalBox}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Select Class</Text>
-              <TouchableOpacity onPress={() => setShowClassPicker(false)}><Ionicons name="close" size={24} color="#fff" /></TouchableOpacity>
+              <TouchableOpacity onPress={() => setShowClassPicker(false)}>
+                <Ionicons name="close" size={24} color="#fff" />
+              </TouchableOpacity>
             </View>
-            <Text style={styles.modalSub}>Choose which class this document is for</Text>
+            <Text style={styles.modalSub}>Students in this class will see the document</Text>
             {lecturerClasses.length === 0 ? (
               <View style={styles.emptyBox}>
                 <Ionicons name="school-outline" size={50} color="#534AB7" />
@@ -415,7 +486,11 @@ export default function MyNotes() {
               </View>
             ) : (
               lecturerClasses.map((c: any) => (
-                <TouchableOpacity key={c.id} style={[styles.classOption, docCourse === c.class_name && styles.classOptionActive]} onPress={() => { setDocCourse(c.class_name); setShowClassPicker(false); }}>
+                <TouchableOpacity
+                  key={c.id}
+                  style={[styles.classOption, docCourse === c.class_name && styles.classOptionActive]}
+                  onPress={() => { setDocCourse(c.class_name); setShowClassPicker(false); }}
+                >
                   <Ionicons name="school-outline" size={20} color="#1D9E75" />
                   <View style={{ flex: 1 }}>
                     <Text style={styles.classOptionName}>{c.class_name}</Text>
@@ -435,9 +510,11 @@ export default function MyNotes() {
           <View style={styles.modalBox}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Enroll in Course</Text>
-              <TouchableOpacity onPress={() => setShowEnrollModal(false)}><Ionicons name="close" size={24} color="#fff" /></TouchableOpacity>
+              <TouchableOpacity onPress={() => setShowEnrollModal(false)}>
+                <Ionicons name="close" size={24} color="#fff" />
+              </TouchableOpacity>
             </View>
-            <Text style={styles.modalSub}>Enter the exact course name your lecturer uses</Text>
+            <Text style={styles.modalSub}>Type the exact course name your lecturer uses when uploading documents</Text>
             <View style={styles.inputBox}>
               <Ionicons name="book-outline" size={18} color="#1D9E75" style={styles.inputIcon} />
               <TextInput style={styles.input} placeholder="e.g. Database Systems" placeholderTextColor="#aaa" value={newCourse} onChangeText={setNewCourse} />
@@ -448,9 +525,13 @@ export default function MyNotes() {
             </TouchableOpacity>
             {enrolledCourses.length > 0 && (
               <>
-                <Text style={styles.modalSub}>Current enrollments (long press to remove):</Text>
+                <Text style={[styles.modalSub, { marginTop: 16 }]}>Current enrollments (long press to remove):</Text>
                 {enrolledCourses.map(c => (
-                  <TouchableOpacity key={c} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#001f4d', borderRadius: 10, padding: 12, marginBottom: 8 }} onLongPress={() => { unenroll(c); setShowEnrollModal(false); }}>
+                  <TouchableOpacity
+                    key={c}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#001f4d', borderRadius: 10, padding: 12, marginBottom: 8 }}
+                    onLongPress={() => { unenroll(c); setShowEnrollModal(false); }}
+                  >
                     <Ionicons name="book" size={16} color="#1D9E75" />
                     <Text style={{ color: '#fff', fontSize: 14 }}>{c}</Text>
                   </TouchableOpacity>

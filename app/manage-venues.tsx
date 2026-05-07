@@ -21,44 +21,47 @@ export default function ManageVenues() {
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [showAssignModal, setShowAssignModal] = useState(false);
-  const [selectedClassForAssign, setSelectedClassForAssign] = useState<any>(null);
+  const [selectedClass, setSelectedClass] = useState<any>(null);
   const [lecturerClasses, setLecturerClasses] = useState<any[]>([]);
   const [classStudents, setClassStudents] = useState<any[]>([]);
   const [monitors, setMonitors] = useState<any[]>([]);
-  const subscriptionRef = useRef<any>(null);
+  const channelRef = useRef<any>(null);
 
   useEffect(() => {
     loadUser();
-    // Realtime subscription — venues update instantly for everyone
-    subscriptionRef.current = supabase
-      .channel('venues-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'venues' }, () => {
-        loadVenues();
+    // Real-time subscription
+    channelRef.current = supabase
+      .channel(`venues-live-${Date.now()}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'venues' }, (payload) => {
+        if (payload.eventType === 'UPDATE') {
+          setVenues(prev => prev.map(v => v.id === payload.new.id ? { ...v, ...payload.new } : v));
+        } else if (payload.eventType === 'INSERT') {
+          setVenues(prev => [...prev, payload.new].sort((a, b) => a.name?.localeCompare(b.name)));
+        } else if (payload.eventType === 'DELETE') {
+          setVenues(prev => prev.filter(v => v.id !== payload.old.id));
+        }
       })
       .subscribe();
-
-    return () => {
-      if (subscriptionRef.current) supabase.removeChannel(subscriptionRef.current);
-    };
+    return () => { if (channelRef.current) supabase.removeChannel(channelRef.current); };
   }, []);
 
   const loadUser = async () => {
     const admin = await AsyncStorage.getItem('current_admin');
-    if (admin) { setUserRole('admin'); setCanEdit(true); setCanToggle(true); loadVenues(); return; }
+    if (admin) { setUserRole('admin'); setCanEdit(true); setCanToggle(true); fetchVenues(); return; }
     const lecturer = await AsyncStorage.getItem('current_lecturer');
     if (lecturer) {
       const l = JSON.parse(lecturer); setUserRole('lecturer'); setCurrentUser(l); setCanEdit(true); setCanToggle(true);
-      loadVenues(); loadLecturerClasses(l.id); loadMonitors(l.id); return;
+      fetchVenues(); loadLecturerClasses(l.id); loadMonitors(l.id); return;
     }
     const student = await AsyncStorage.getItem('current_student');
     if (student) {
       const s = JSON.parse(student); setUserRole('student'); setCurrentUser(s); setCanEdit(false);
       const { data } = await supabase.from('venue_monitors').select('id').eq('student_id', s.id).maybeSingle();
-      setCanToggle(!!data); loadVenues();
+      setCanToggle(!!data); fetchVenues();
     }
   };
 
-  const loadVenues = async () => {
+  const fetchVenues = async () => {
     const { data } = await supabase.from('venues').select('*').order('campus').order('name');
     setVenues(data || []);
   };
@@ -69,32 +72,29 @@ export default function ManageVenues() {
   };
 
   const loadMonitors = async (lid: string) => {
-    const { data: myClasses } = await supabase.from('classes').select('id').eq('lecturer_id', lid);
-    if (!myClasses || myClasses.length === 0) { setMonitors([]); return; }
-    const classIds = myClasses.map((c: any) => c.id);
-    const { data } = await supabase.from('venue_monitors').select('id, student_id, class_id, classes(class_name)').in('class_id', classIds);
-    if (!data || data.length === 0) { setMonitors([]); return; }
-    const { data: students } = await supabase.from('students').select('id, name, surname, reg_number').in('id', data.map((m: any) => m.student_id));
-    const sMap: any = {};
-    (students || []).forEach((s: any) => { sMap[s.id] = s; });
-    setMonitors(data.map((m: any) => ({ ...m, student: sMap[m.student_id] })));
+    const { data: mc } = await supabase.from('classes').select('id').eq('lecturer_id', lid);
+    if (!mc?.length) { setMonitors([]); return; }
+    const { data: mon } = await supabase.from('venue_monitors').select('id, student_id, class_id, classes(class_name)').in('class_id', mc.map((c: any) => c.id));
+    if (!mon?.length) { setMonitors([]); return; }
+    const { data: studs } = await supabase.from('students').select('id, name, surname, reg_number').in('id', mon.map((m: any) => m.student_id));
+    const sm: any = {}; (studs || []).forEach((s: any) => { sm[s.id] = s; });
+    setMonitors(mon.map((m: any) => ({ ...m, student: sm[m.student_id] })));
   };
 
   const loadClassStudents = async (classId: string) => {
-    const { data: enrollments } = await supabase.from('class_enrollments').select('student_id').eq('class_id', classId);
-    if (!enrollments || enrollments.length === 0) { setClassStudents([]); return; }
-    const { data: students } = await supabase.from('students').select('id, name, surname, reg_number').in('id', enrollments.map((e: any) => e.student_id));
-    setClassStudents(students || []);
+    const { data: enr } = await supabase.from('class_enrollments').select('student_id').eq('class_id', classId);
+    if (!enr?.length) { setClassStudents([]); return; }
+    const { data: studs } = await supabase.from('students').select('id, name, surname, reg_number').in('id', enr.map((e: any) => e.student_id));
+    setClassStudents(studs || []);
   };
 
   const assignMonitor = async (studentId: string, classId: string) => {
     const existing = monitors.filter((m: any) => m.class_id === classId);
-    if (existing.length >= 2) { Alert.alert('Limit Reached', 'Maximum 2 venue monitors per class.'); return; }
+    if (existing.length >= 2) { Alert.alert('Limit Reached', 'Max 2 monitors per class.'); return; }
     if (existing.find((m: any) => m.student_id === studentId)) { Alert.alert('Already Assigned', 'This student is already a monitor'); return; }
     const { error } = await supabase.from('venue_monitors').insert({ student_id: studentId, class_id: classId, assigned_by: currentUser.id });
     if (error) { Alert.alert('Error', error.message); return; }
-    Alert.alert('Assigned!', 'Student can now toggle venue status.');
-    loadMonitors(currentUser.id);
+    Alert.alert('Assigned!', 'Student can now toggle venue status.'); loadMonitors(currentUser.id);
   };
 
   const removeMonitor = async (monitorId: string) => {
@@ -107,21 +107,29 @@ export default function ManageVenues() {
   const toggleStatus = async (venue: any) => {
     if (!canToggle) { Alert.alert('View Only', 'Only assigned monitors and staff can update venue status'); return; }
     const next = venue.status === 'available' ? 'occupied' : venue.status === 'occupied' ? 'maintenance' : 'available';
-    await supabase.from('venues').update({ status: next }).eq('id', venue.id);
-    // Realtime subscription will auto-refresh
+    // Optimistic update immediately
+    setVenues(prev => prev.map(v => v.id === venue.id ? { ...v, status: next } : v));
+    const { error } = await supabase.from('venues').update({ status: next }).eq('id', venue.id);
+    if (error) {
+      // Revert on error
+      setVenues(prev => prev.map(v => v.id === venue.id ? { ...v, status: venue.status } : v));
+      Alert.alert('Error', error.message);
+    }
   };
 
   const handleSave = async () => {
-    if (!vName || !vCampus || !vCapacity) { Alert.alert('Missing', 'Fill in all fields'); return; }
+    if (!vName.trim() || !vCampus.trim() || !vCapacity.trim()) { Alert.alert('Missing', 'Fill in all fields'); return; }
+    const cap = parseInt(vCapacity.replace(/[^0-9]/g, '')) || 0;
     setLoading(true);
     try {
       if (editingVenue) {
-        await supabase.from('venues').update({ name: vName, campus: vCampus, capacity: parseInt(vCapacity) || 0, status: vStatus }).eq('id', editingVenue.id);
+        await supabase.from('venues').update({ name: vName.trim(), campus: vCampus.trim(), capacity: cap, status: vStatus }).eq('id', editingVenue.id);
       } else {
-        await supabase.from('venues').insert({ name: vName, campus: vCampus, capacity: parseInt(vCapacity) || 0, status: vStatus });
+        await supabase.from('venues').insert({ name: vName.trim(), campus: vCampus.trim(), capacity: cap, status: vStatus });
       }
       setShowForm(false); setVName(''); setVCampus(''); setVCapacity(''); setVStatus('available'); setEditingVenue(null);
-    } finally { setLoading(false); }
+    } catch (e: any) { Alert.alert('Error', e.message); }
+    finally { setLoading(false); }
   };
 
   const handleDelete = (venue: any) => {
@@ -131,26 +139,37 @@ export default function ManageVenues() {
     ]);
   };
 
-  const sc = (s: string) => s === 'available' ? '#1D9E75' : s === 'maintenance' ? '#D8832A' : '#D85A30';
-  const sb = (s: string) => s === 'available' ? '#0a3d2e' : s === 'maintenance' ? '#2a1500' : '#3d1a0a';
-  const si = (s: string): any => s === 'available' ? 'checkmark-circle' : s === 'maintenance' ? 'construct' : 'close-circle';
+  // Status colours
+  const statusConfig: any = {
+    available: { color: '#1D9E75', bg: '#0a3d2e', darkBg: '#0a5a3a', label: 'Available', icon: 'checkmark-circle' },
+    occupied:  { color: '#D85A30', bg: '#3d1a0a', darkBg: '#5a2a0a', label: 'Occupied',  icon: 'close-circle' },
+    maintenance:{ color: '#D8832A', bg: '#2a1500', darkBg: '#3a2000', label: 'Maintenance', icon: 'construct' },
+  };
+  const getStatus = (s: string) => statusConfig[s] || statusConfig['occupied'];
 
   const filtered = venues.filter(v =>
     v.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     v.campus?.toLowerCase().includes(searchQuery.toLowerCase())
   );
-  const totalVenues = venues.length;
-  const freeVenues = venues.filter(v => v.status === 'available').length;
-  const occupiedVenues = venues.filter(v => v.status === 'occupied').length;
-  const maintenanceVenues = venues.filter(v => v.status === 'maintenance').length;
-  const campuses = [...new Set(filtered.map((v: any) => v.campus))].sort();
+  const stats = {
+    total: venues.length,
+    free: venues.filter(v => v.status === 'available').length,
+    occupied: venues.filter(v => v.status === 'occupied').length,
+    maintenance: venues.filter(v => v.status === 'maintenance').length,
+  };
+  const campuses = [...new Set(filtered.map((v: any) => v.campus).filter(Boolean))].sort();
+
+  const capNum = (v: any) => {
+    const n = parseInt(v.capacity);
+    return isNaN(n) ? 0 : n;
+  };
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="#ffffff" /></TouchableOpacity>
+        <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="#fff" /></TouchableOpacity>
         <Text style={styles.title}>Venues</Text>
-        <View style={{ flexDirection: 'row', gap: 10 }}>
+        <View style={{ flexDirection: 'row', gap: 12 }}>
           {userRole === 'lecturer' && (
             <TouchableOpacity onPress={() => setShowAssignModal(true)}>
               <Ionicons name="person-add-outline" size={24} color="#FFD700" />
@@ -166,49 +185,57 @@ export default function ManageVenues() {
 
       {/* STATS */}
       <View style={styles.statsRow}>
-        <View style={styles.statCard}>
-          <Ionicons name="location-outline" size={22} color="#a0c4ff" />
-          <Text style={styles.statNum}>{totalVenues}</Text>
+        <View style={[styles.statCard, { borderColor: '#a0c4ff' }]}>
+          <Ionicons name="location" size={20} color="#a0c4ff" />
+          <Text style={[styles.statNum, { color: '#ffffff' }]}>{stats.total}</Text>
           <Text style={styles.statLabel}>Total</Text>
         </View>
-        <View style={[styles.statCard, { borderColor: '#1D9E75' }]}>
-          <Ionicons name="checkmark-circle-outline" size={22} color="#1D9E75" />
-          <Text style={[styles.statNum, { color: '#1D9E75' }]}>{freeVenues}</Text>
-          <Text style={styles.statLabel}>Free</Text>
+        <View style={[styles.statCard, { borderColor: '#1D9E75', backgroundColor: '#0a3d2e' }]}>
+          <Ionicons name="checkmark-circle" size={20} color="#1D9E75" />
+          <Text style={[styles.statNum, { color: '#1D9E75' }]}>{stats.free}</Text>
+          <Text style={[styles.statLabel, { color: '#1D9E75' }]}>Free</Text>
         </View>
-        <View style={[styles.statCard, { borderColor: '#D85A30' }]}>
-          <Ionicons name="close-circle-outline" size={22} color="#D85A30" />
-          <Text style={[styles.statNum, { color: '#D85A30' }]}>{occupiedVenues}</Text>
-          <Text style={styles.statLabel}>Occupied</Text>
+        <View style={[styles.statCard, { borderColor: '#D85A30', backgroundColor: '#3d1a0a' }]}>
+          <Ionicons name="close-circle" size={20} color="#D85A30" />
+          <Text style={[styles.statNum, { color: '#D85A30' }]}>{stats.occupied}</Text>
+          <Text style={[styles.statLabel, { color: '#D85A30' }]}>Occupied</Text>
         </View>
-        <View style={[styles.statCard, { borderColor: '#D8832A' }]}>
-          <Ionicons name="construct-outline" size={22} color="#D8832A" />
-          <Text style={[styles.statNum, { color: '#D8832A' }]}>{maintenanceVenues}</Text>
-          <Text style={styles.statLabel}>Maint.</Text>
+        <View style={[styles.statCard, { borderColor: '#D8832A', backgroundColor: '#2a1500' }]}>
+          <Ionicons name="construct" size={20} color="#D8832A" />
+          <Text style={[styles.statNum, { color: '#D8832A' }]}>{stats.maintenance}</Text>
+          <Text style={[styles.statLabel, { color: '#D8832A' }]}>Maint.</Text>
         </View>
       </View>
 
+      {/* Banner */}
       <View style={[styles.banner, { borderColor: canToggle ? '#1D9E75' : '#534AB7', backgroundColor: canToggle ? '#0a3d2e' : '#1a1650' }]}>
         <Ionicons name={canToggle ? 'shield-checkmark' : 'eye-outline'} size={16} color={canToggle ? '#1D9E75' : '#a0c4ff'} />
         <Text style={[styles.bannerText, { color: canToggle ? '#1D9E75' : '#a0c4ff' }]}>
-          {userRole === 'admin' ? 'Admin — Full venue management' :
-            userRole === 'lecturer' ? 'Lecturer — Manage venues. Tap person+ to assign monitors' :
-              canToggle ? 'Venue Monitor — Tap a venue card to toggle its status' :
-                'View only — Status managed by monitors and staff'}
+          {userRole === 'admin' ? 'Admin — Full venue management access' :
+           userRole === 'lecturer' ? 'Lecturer — Tap venue to toggle status. Tap 👤+ to assign monitors' :
+           canToggle ? 'You are a Venue Monitor — Tap any venue card to toggle its status' :
+           'View only — Venue status is managed by assigned monitors and staff'}
         </Text>
       </View>
 
+      {/* Search */}
       <View style={styles.searchBox}>
-        <Ionicons name="search-outline" size={20} color="#a0c4ff" />
+        <Ionicons name="search-outline" size={18} color="#a0c4ff" />
         <TextInput style={styles.searchInput} placeholder="Search venues..." placeholderTextColor="#aaa" value={searchQuery} onChangeText={setSearchQuery} />
+        {searchQuery.length > 0 && (
+          <TouchableOpacity onPress={() => setSearchQuery('')}><Ionicons name="close-circle" size={18} color="#a0c4ff" /></TouchableOpacity>
+        )}
       </View>
 
+      {/* Monitors list for lecturer */}
       {userRole === 'lecturer' && monitors.length > 0 && (
         <View style={styles.monitorsBox}>
-          <Text style={styles.monitorsTitle}>Venue Monitors</Text>
+          <Text style={styles.monitorsTitle}>🛡️ Assigned Venue Monitors</Text>
           {monitors.map((m: any) => (
             <View key={m.id} style={styles.monitorRow}>
-              <Ionicons name="shield-checkmark" size={16} color="#1D9E75" />
+              <View style={styles.monitorAvatar}>
+                <Text style={styles.monitorAvatarText}>{(m.student?.name || '?')[0].toUpperCase()}</Text>
+              </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.monitorName}>{m.student?.name} {m.student?.surname}</Text>
                 <Text style={styles.monitorSub}>{m.student?.reg_number} · {(m.classes as any)?.class_name}</Text>
@@ -221,88 +248,111 @@ export default function ManageVenues() {
         </View>
       )}
 
+      {/* Add/Edit form */}
       {showForm && canEdit && (
         <View style={styles.form}>
-          <Text style={styles.formTitle}>{editingVenue ? 'Edit Venue' : 'Add Venue'}</Text>
+          <Text style={styles.formTitle}>{editingVenue ? '✏️ Edit Venue' : '➕ Add New Venue'}</Text>
           {[
-            { ph: 'Venue Name e.g. Lecture Hall A', val: vName, set: setVName, kb: 'default' as any },
-            { ph: 'Campus e.g. Main Campus', val: vCampus, set: setVCampus, kb: 'default' as any },
-            { ph: 'Capacity e.g. 200', val: vCapacity, set: setVCapacity, kb: 'numeric' as any },
+            { ph: 'Venue Name *', val: vName, set: setVName, kb: 'default' as any },
+            { ph: 'Campus / Block *', val: vCampus, set: setVCampus, kb: 'default' as any },
+            { ph: 'Capacity (number of seats) *', val: vCapacity, set: setVCapacity, kb: 'numeric' as any },
           ].map((f, i) => (
             <View key={i} style={styles.inputBox}>
-              <TextInput style={styles.input} placeholder={f.ph} placeholderTextColor="#aaa" value={f.val} onChangeText={f.set} keyboardType={f.kb} />
+              <TextInput style={styles.input} placeholder={f.ph} placeholderTextColor="#666" value={f.val} onChangeText={f.set} keyboardType={f.kb} />
             </View>
           ))}
-          <Text style={styles.label}>Status</Text>
+          <Text style={styles.label}>Initial Status</Text>
           <View style={styles.statusBtnRow}>
-            {['available', 'occupied', 'maintenance'].map(s => (
-              <TouchableOpacity key={s} style={[styles.statusOptionBtn, vStatus === s && { backgroundColor: sc(s) + '33', borderColor: sc(s) }]} onPress={() => setVStatus(s)}>
-                <Text style={[styles.statusOptionText, vStatus === s && { color: sc(s), fontWeight: 'bold' }]}>{s.charAt(0).toUpperCase() + s.slice(1)}</Text>
-              </TouchableOpacity>
-            ))}
+            {['available', 'occupied', 'maintenance'].map(s => {
+              const cfg = getStatus(s);
+              return (
+                <TouchableOpacity key={s} style={[styles.statusPickerBtn, vStatus === s && { backgroundColor: cfg.bg, borderColor: cfg.color }]} onPress={() => setVStatus(s)}>
+                  <Ionicons name={cfg.icon as any} size={16} color={vStatus === s ? cfg.color : '#a0c4ff'} />
+                  <Text style={[styles.statusPickerText, vStatus === s && { color: cfg.color, fontWeight: 'bold' }]}>{cfg.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
           <View style={styles.formBtns}>
             <TouchableOpacity style={styles.cancelBtn} onPress={() => { setShowForm(false); setEditingVenue(null); }}>
               <Text style={styles.cancelBtnText}>Cancel</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[styles.saveBtn, loading && { opacity: 0.6 }]} onPress={handleSave} disabled={loading}>
-              <Text style={styles.saveBtnText}>{loading ? 'Saving...' : editingVenue ? 'Update' : 'Add Venue'}</Text>
+              <Ionicons name={editingVenue ? 'checkmark-circle' : 'add-circle'} size={18} color="#fff" />
+              <Text style={styles.saveBtnText}>{loading ? 'Saving...' : editingVenue ? 'Update Venue' : 'Add Venue'}</Text>
             </TouchableOpacity>
           </View>
         </View>
       )}
 
+      {/* Venue list */}
       {filtered.length === 0 ? (
         <View style={styles.emptyBox}>
           <Ionicons name="location-outline" size={60} color="#534AB7" />
           <Text style={styles.emptyTitle}>No Venues Found</Text>
+          <Text style={styles.emptyText}>{canEdit ? 'Tap + to add a venue' : 'No venues available'}</Text>
         </View>
       ) : (
         campuses.map(camp => (
           <View key={camp}>
-            <Text style={styles.campusHeader}>{camp}</Text>
-            {filtered.filter(v => v.campus === camp).map((v: any) => (
-              <TouchableOpacity
-                key={v.id}
-                style={[styles.venueCard, { borderLeftColor: sc(v.status) }]}
-                onPress={() => canToggle ? toggleStatus(v) : null}
-                activeOpacity={canToggle ? 0.7 : 1}
-              >
-                <View style={styles.venueRow}>
-                  <View style={[styles.statusIconBox, { backgroundColor: sb(v.status) }]}>
-                    <Ionicons name={si(v.status)} size={24} color={sc(v.status)} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.venueName}>{v.name}</Text>
-                    <View style={styles.venueMetaRow}>
-                      <Ionicons name="people-outline" size={13} color="#a0c4ff" />
-                      <Text style={styles.venueMeta}>{v.capacity || 0} seats</Text>
-                      <View style={[styles.statusPill, { backgroundColor: sb(v.status), borderColor: sc(v.status) }]}>
-                        <Text style={[styles.statusPillText, { color: sc(v.status) }]}>{v.status?.charAt(0).toUpperCase() + v.status?.slice(1)}</Text>
+            <View style={styles.campusHeaderRow}>
+              <Ionicons name="business-outline" size={14} color="#FFD700" />
+              <Text style={styles.campusHeader}>{camp}</Text>
+              <Text style={styles.campusCount}>{filtered.filter(v => v.campus === camp).length} venue{filtered.filter(v => v.campus === camp).length !== 1 ? 's' : ''}</Text>
+            </View>
+            {filtered.filter(v => v.campus === camp).map((v: any) => {
+              const cfg = getStatus(v.status || 'occupied');
+              return (
+                <TouchableOpacity
+                  key={v.id}
+                  style={[styles.venueCard, { borderColor: cfg.color, backgroundColor: cfg.bg }]}
+                  onPress={() => canToggle ? toggleStatus(v) : null}
+                  activeOpacity={canToggle ? 0.75 : 1}
+                >
+                  <View style={styles.venueCardInner}>
+                    {/* Status icon circle */}
+                    <View style={[styles.statusCircle, { backgroundColor: cfg.darkBg, borderColor: cfg.color }]}>
+                      <Ionicons name={cfg.icon as any} size={26} color={cfg.color} />
+                    </View>
+
+                    {/* Info */}
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.venueName}>{v.name}</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 4, flexWrap: 'wrap' }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                          <Ionicons name="people-outline" size={13} color="#a0c4ff" />
+                          <Text style={styles.venueMeta}>{capNum(v)} seats</Text>
+                        </View>
+                        <View style={[styles.statusBadge, { borderColor: cfg.color, backgroundColor: cfg.darkBg }]}>
+                          <View style={[styles.statusDot, { backgroundColor: cfg.color }]} />
+                          <Text style={[styles.statusBadgeText, { color: cfg.color }]}>{cfg.label}</Text>
+                        </View>
                       </View>
                     </View>
+
+                    {/* Actions */}
+                    <View style={{ gap: 8, alignItems: 'flex-end' }}>
+                      {canEdit && (
+                        <View style={{ flexDirection: 'row', gap: 6 }}>
+                          <TouchableOpacity style={styles.editBtn} onPress={() => { setEditingVenue(v); setVName(v.name); setVCampus(v.campus); setVCapacity(capNum(v).toString()); setVStatus(v.status || 'available'); setShowForm(true); }}>
+                            <Ionicons name="pencil" size={15} color="#a0c4ff" />
+                          </TouchableOpacity>
+                          <TouchableOpacity style={styles.deleteBtn} onPress={() => handleDelete(v)}>
+                            <Ionicons name="trash" size={15} color="#D85A30" />
+                          </TouchableOpacity>
+                        </View>
+                      )}
+                      {canToggle && !canEdit && (
+                        <View style={[styles.toggleIndicator, { borderColor: cfg.color }]}>
+                          <Ionicons name="swap-horizontal" size={16} color={cfg.color} />
+                          <Text style={[styles.toggleIndicatorText, { color: cfg.color }]}>Tap to toggle</Text>
+                        </View>
+                      )}
+                    </View>
                   </View>
-                  <View style={{ gap: 6, alignItems: 'flex-end' }}>
-                    {canEdit && (
-                      <View style={{ flexDirection: 'row', gap: 6 }}>
-                        <TouchableOpacity style={styles.editBtn} onPress={() => { setEditingVenue(v); setVName(v.name); setVCampus(v.campus); setVCapacity((v.capacity || 0).toString()); setVStatus(v.status); setShowForm(true); }}>
-                          <Ionicons name="pencil-outline" size={16} color="#a0c4ff" />
-                        </TouchableOpacity>
-                        <TouchableOpacity style={styles.deleteBtn} onPress={() => handleDelete(v)}>
-                          <Ionicons name="trash-outline" size={16} color="#D85A30" />
-                        </TouchableOpacity>
-                      </View>
-                    )}
-                    {canToggle && !canEdit && (
-                      <TouchableOpacity style={styles.toggleBtn} onPress={() => toggleStatus(v)}>
-                        <Ionicons name="swap-horizontal" size={18} color="#FFD700" />
-                        <Text style={styles.toggleBtnText}>Toggle</Text>
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                </View>
-              </TouchableOpacity>
-            ))}
+                </TouchableOpacity>
+              );
+            })}
           </View>
         ))
       )}
@@ -312,16 +362,16 @@ export default function ManageVenues() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalBox}>
             <Text style={styles.modalTitle}>Assign Venue Monitors</Text>
-            <Text style={styles.modalSub}>Select a class then choose up to 2 students</Text>
-            {!selectedClassForAssign ? (
+            <Text style={styles.modalSub}>Select a class then choose up to 2 students as monitors</Text>
+            {!selectedClass ? (
               <>
-                <Text style={styles.modalLabel}>Select Class:</Text>
+                <Text style={styles.modalLabel}>Your Classes:</Text>
                 {lecturerClasses.length === 0 ? (
-                  <Text style={styles.noClassText}>No classes yet. Create in Classroom first.</Text>
+                  <Text style={styles.noClassText}>No classes found. Create classes in Classroom first.</Text>
                 ) : (
                   lecturerClasses.map((c: any) => (
-                    <TouchableOpacity key={c.id} style={styles.classOption} onPress={() => { setSelectedClassForAssign(c); loadClassStudents(c.id); }}>
-                      <Ionicons name="school-outline" size={18} color="#1D9E75" />
+                    <TouchableOpacity key={c.id} style={styles.classOption} onPress={() => { setSelectedClass(c); loadClassStudents(c.id); }}>
+                      <View style={styles.classOptionIcon}><Ionicons name="school-outline" size={18} color="#1D9E75" /></View>
                       <View style={{ flex: 1 }}>
                         <Text style={styles.classOptionName}>{c.class_name}</Text>
                         <Text style={styles.classOptionCode}>{c.class_code}</Text>
@@ -333,30 +383,33 @@ export default function ManageVenues() {
               </>
             ) : (
               <>
-                <TouchableOpacity style={styles.backToClasses} onPress={() => { setSelectedClassForAssign(null); setClassStudents([]); }}>
+                <TouchableOpacity style={styles.backBtn} onPress={() => { setSelectedClass(null); setClassStudents([]); }}>
                   <Ionicons name="arrow-back" size={16} color="#a0c4ff" />
-                  <Text style={styles.backToClassesText}>Back to classes</Text>
+                  <Text style={styles.backBtnText}>Back to classes</Text>
                 </TouchableOpacity>
-                <Text style={styles.modalLabel}>Students in {selectedClassForAssign.class_name}:</Text>
+                <Text style={styles.modalLabel}>Students in {selectedClass.class_name}:</Text>
                 {classStudents.length === 0 ? (
-                  <Text style={styles.noClassText}>No students enrolled yet.</Text>
+                  <Text style={styles.noClassText}>No students enrolled in this class yet.</Text>
                 ) : (
                   <ScrollView style={{ maxHeight: 300 }}>
                     {classStudents.map((s: any) => {
                       const isM = monitors.some((m: any) => m.student_id === s.id);
                       return (
-                        <View key={s.id} style={styles.studentAssignRow}>
+                        <View key={s.id} style={styles.studentRow}>
+                          <View style={styles.studentAvatar}>
+                            <Text style={styles.studentAvatarText}>{(s.name || '?')[0].toUpperCase()}</Text>
+                          </View>
                           <View style={{ flex: 1 }}>
-                            <Text style={styles.studentAssignName}>{s.name} {s.surname}</Text>
-                            <Text style={styles.studentAssignReg}>{s.reg_number}</Text>
+                            <Text style={styles.studentName}>{s.name} {s.surname}</Text>
+                            <Text style={styles.studentReg}>{s.reg_number}</Text>
                           </View>
                           {isM ? (
-                            <View style={styles.assignedBadge}>
+                            <View style={styles.monitorBadge}>
                               <Ionicons name="shield-checkmark" size={14} color="#1D9E75" />
-                              <Text style={styles.assignedBadgeText}>Monitor</Text>
+                              <Text style={styles.monitorBadgeText}>Monitor</Text>
                             </View>
                           ) : (
-                            <TouchableOpacity style={styles.assignBtn} onPress={() => assignMonitor(s.id, selectedClassForAssign.id)}>
+                            <TouchableOpacity style={styles.assignBtn} onPress={() => assignMonitor(s.id, selectedClass.id)}>
                               <Text style={styles.assignBtnText}>Assign</Text>
                             </TouchableOpacity>
                           )}
@@ -367,81 +420,90 @@ export default function ManageVenues() {
                 )}
               </>
             )}
-            <TouchableOpacity style={styles.closeModalBtn} onPress={() => { setShowAssignModal(false); setSelectedClassForAssign(null); setClassStudents([]); }}>
-              <Text style={styles.closeModalBtnText}>Done</Text>
+            <TouchableOpacity style={styles.doneBtn} onPress={() => { setShowAssignModal(false); setSelectedClass(null); setClassStudents([]); }}>
+              <Text style={styles.doneBtnText}>Done</Text>
             </TouchableOpacity>
           </View>
         </View>
       </Modal>
-      <View style={{ height: 40 }} />
+
+      <View style={{ height: 50 }} />
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#001f4d', padding: 20, paddingTop: 60 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
+  container: { flex: 1, backgroundColor: '#001029', paddingHorizontal: 16, paddingTop: 60 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
   title: { fontSize: 22, fontWeight: 'bold', color: '#ffffff', flex: 1, textAlign: 'center' },
-  statsRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 14, gap: 8 },
-  statCard: { flex: 1, backgroundColor: '#0a2a4a', borderWidth: 1, borderColor: '#a0c4ff', borderRadius: 12, padding: 12, alignItems: 'center', gap: 4 },
-  statNum: { fontSize: 22, fontWeight: 'bold', color: '#ffffff' },
-  statLabel: { fontSize: 11, color: '#a0c4ff' },
-  banner: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, borderWidth: 1, borderRadius: 10, padding: 12, marginBottom: 14 },
-  bannerText: { fontSize: 12, flex: 1, lineHeight: 18 },
-  searchBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0a2a4a', borderWidth: 1, borderColor: '#534AB7', borderRadius: 12, padding: 12, marginBottom: 14, gap: 10 },
-  searchInput: { flex: 1, fontSize: 15, color: '#ffffff' },
-  monitorsBox: { backgroundColor: '#0a3d2e', borderWidth: 1, borderColor: '#1D9E75', borderRadius: 12, padding: 14, marginBottom: 14 },
-  monitorsTitle: { color: '#1D9E75', fontWeight: 'bold', fontSize: 13, marginBottom: 10 },
-  monitorRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#0a5a3e' },
+  statsRow: { flexDirection: 'row', gap: 8, marginBottom: 14 },
+  statCard: { flex: 1, backgroundColor: '#0a1a2e', borderWidth: 1.5, borderRadius: 14, padding: 10, alignItems: 'center', gap: 3 },
+  statNum: { fontSize: 20, fontWeight: 'bold' },
+  statLabel: { fontSize: 10, color: '#a0c4ff', fontWeight: '600' },
+  banner: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, borderWidth: 1, borderRadius: 12, padding: 12, marginBottom: 12 },
+  bannerText: { fontSize: 12, flex: 1, lineHeight: 17 },
+  searchBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0a1a2e', borderWidth: 1, borderColor: '#2a3a5a', borderRadius: 12, padding: 12, marginBottom: 14, gap: 10 },
+  searchInput: { flex: 1, fontSize: 14, color: '#ffffff' },
+  monitorsBox: { backgroundColor: '#0a2a1e', borderWidth: 1, borderColor: '#1D9E75', borderRadius: 14, padding: 14, marginBottom: 14 },
+  monitorsTitle: { color: '#1D9E75', fontWeight: 'bold', fontSize: 13, marginBottom: 12 },
+  monitorRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#0a3d2e' },
+  monitorAvatar: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#1D9E75', alignItems: 'center', justifyContent: 'center' },
+  monitorAvatarText: { color: '#fff', fontWeight: 'bold', fontSize: 14 },
   monitorName: { color: '#ffffff', fontSize: 14, fontWeight: 'bold' },
   monitorSub: { color: '#a0c4ff', fontSize: 12 },
-  removeMonitorBtn: { padding: 6, backgroundColor: '#3d1a0a', borderRadius: 8 },
-  form: { backgroundColor: '#0a2a4a', borderWidth: 1, borderColor: '#534AB7', borderRadius: 14, padding: 16, marginBottom: 14 },
+  removeMonitorBtn: { padding: 8, backgroundColor: '#3d1a0a', borderRadius: 10 },
+  form: { backgroundColor: '#0a1a2e', borderWidth: 1, borderColor: '#2a3a5a', borderRadius: 16, padding: 16, marginBottom: 14 },
   formTitle: { fontSize: 16, fontWeight: 'bold', color: '#FFD700', marginBottom: 14 },
-  inputBox: { backgroundColor: '#001f4d', borderWidth: 1, borderColor: '#534AB7', borderRadius: 10, padding: 12, marginBottom: 10 },
-  input: { fontSize: 15, color: '#ffffff' },
+  inputBox: { backgroundColor: '#001029', borderWidth: 1, borderColor: '#2a3a5a', borderRadius: 10, padding: 13, marginBottom: 10 },
+  input: { fontSize: 14, color: '#ffffff' },
   label: { color: '#a0c4ff', fontWeight: 'bold', fontSize: 13, marginBottom: 8 },
   statusBtnRow: { flexDirection: 'row', gap: 8, marginBottom: 14 },
-  statusOptionBtn: { flex: 1, padding: 10, borderRadius: 10, borderWidth: 1, borderColor: '#534AB7', alignItems: 'center' },
-  statusOptionText: { color: '#a0c4ff', fontSize: 13 },
-  formBtns: { flexDirection: 'row', gap: 12 },
-  cancelBtn: { flex: 1, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: '#534AB7', alignItems: 'center' },
-  cancelBtnText: { color: '#a0c4ff', fontWeight: 'bold' },
-  saveBtn: { flex: 2, backgroundColor: '#534AB7', padding: 14, borderRadius: 12, alignItems: 'center' },
-  saveBtnText: { color: '#ffffff', fontWeight: 'bold', fontSize: 15 },
-  campusHeader: { color: '#FFD700', fontWeight: 'bold', fontSize: 14, marginBottom: 8, marginTop: 10, letterSpacing: 1 },
+  statusPickerBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, padding: 10, borderRadius: 10, borderWidth: 1.5, borderColor: '#2a3a5a', backgroundColor: '#0a1a2e' },
+  statusPickerText: { color: '#a0c4ff', fontSize: 12 },
+  formBtns: { flexDirection: 'row', gap: 10 },
+  cancelBtn: { flex: 1, padding: 13, borderRadius: 12, borderWidth: 1, borderColor: '#2a3a5a', alignItems: 'center' },
+  cancelBtnText: { color: '#a0c4ff', fontWeight: '600' },
+  saveBtn: { flex: 2, backgroundColor: '#534AB7', padding: 13, borderRadius: 12, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 },
+  saveBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 15 },
+  campusHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 12, marginBottom: 8 },
+  campusHeader: { color: '#FFD700', fontWeight: 'bold', fontSize: 14, flex: 1, letterSpacing: 0.5 },
+  campusCount: { color: '#7a9cc4', fontSize: 11 },
   emptyBox: { alignItems: 'center', marginTop: 60, gap: 12 },
   emptyTitle: { color: '#ffffff', fontSize: 18, fontWeight: 'bold' },
-  venueCard: { backgroundColor: '#0a2a4a', borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: '#1a2a3a', borderLeftWidth: 4 },
-  venueRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  statusIconBox: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
-  venueName: { fontSize: 15, fontWeight: 'bold', color: '#ffffff', marginBottom: 4 },
-  venueMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  venueMeta: { fontSize: 12, color: '#a0c4ff', marginRight: 8 },
-  statusPill: { alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 3, borderRadius: 10, borderWidth: 1 },
-  statusPillText: { fontSize: 12, fontWeight: 'bold' },
-  editBtn: { padding: 6, backgroundColor: '#1a2a3a', borderRadius: 8 },
-  deleteBtn: { padding: 6, backgroundColor: '#3d1a0a', borderRadius: 8 },
-  toggleBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#2a2a0e', padding: 8, borderRadius: 10, borderWidth: 1, borderColor: '#FFD700' },
-  toggleBtnText: { color: '#FFD700', fontSize: 12, fontWeight: 'bold' },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'flex-end' },
-  modalBox: { backgroundColor: '#001f4d', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 24, maxHeight: '85%' },
-  modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#FFD700', marginBottom: 6 },
+  emptyText: { color: '#a0c4ff', fontSize: 14 },
+  venueCard: { borderRadius: 16, padding: 14, marginBottom: 10, borderWidth: 1.5 },
+  venueCardInner: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  statusCircle: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center', borderWidth: 2 },
+  venueName: { fontSize: 15, fontWeight: 'bold', color: '#ffffff', marginBottom: 2 },
+  venueMeta: { fontSize: 12, color: '#a0c4ff' },
+  statusBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 9, paddingVertical: 3, borderRadius: 10, borderWidth: 1 },
+  statusDot: { width: 7, height: 7, borderRadius: 4 },
+  statusBadgeText: { fontSize: 12, fontWeight: 'bold' },
+  editBtn: { padding: 8, backgroundColor: '#1a2a3a', borderRadius: 10 },
+  deleteBtn: { padding: 8, backgroundColor: '#3d1a0a', borderRadius: 10 },
+  toggleIndicator: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 10, borderWidth: 1 },
+  toggleIndicatorText: { fontSize: 11, fontWeight: 'bold' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'flex-end' },
+  modalBox: { backgroundColor: '#001029', borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 24, maxHeight: '88%' },
+  modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#FFD700', marginBottom: 4 },
   modalSub: { fontSize: 13, color: '#a0c4ff', marginBottom: 18 },
   modalLabel: { color: '#a0c4ff', fontWeight: 'bold', fontSize: 13, marginBottom: 10 },
-  noClassText: { color: '#7a9cc4', fontSize: 14, fontStyle: 'italic', marginBottom: 14 },
-  classOption: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#0a2a4a', borderWidth: 1, borderColor: '#534AB7', borderRadius: 12, padding: 14, marginBottom: 8 },
+  noClassText: { color: '#7a9cc4', fontStyle: 'italic', marginBottom: 14, fontSize: 14 },
+  classOption: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#0a1a2e', borderWidth: 1, borderColor: '#2a3a5a', borderRadius: 12, padding: 14, marginBottom: 8 },
+  classOptionIcon: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#0a3d2e', alignItems: 'center', justifyContent: 'center' },
   classOptionName: { color: '#ffffff', fontSize: 14, fontWeight: 'bold' },
   classOptionCode: { color: '#FFD700', fontSize: 12 },
-  backToClasses: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 14 },
-  backToClassesText: { color: '#a0c4ff', fontSize: 14 },
-  studentAssignRow: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#0a2a4a', borderRadius: 10, padding: 12, marginBottom: 8 },
-  studentAssignName: { color: '#ffffff', fontSize: 14, fontWeight: 'bold' },
-  studentAssignReg: { color: '#a0c4ff', fontSize: 12 },
-  assignedBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#0a3d2e', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, borderWidth: 1, borderColor: '#1D9E75' },
-  assignedBadgeText: { color: '#1D9E75', fontSize: 12, fontWeight: 'bold' },
-  assignBtn: { backgroundColor: '#1D9E75', paddingHorizontal: 14, paddingVertical: 6, borderRadius: 10 },
-  assignBtnText: { color: '#ffffff', fontSize: 13, fontWeight: 'bold' },
-  closeModalBtn: { backgroundColor: '#534AB7', padding: 14, borderRadius: 12, alignItems: 'center', marginTop: 16 },
-  closeModalBtnText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold' },
+  backBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 14 },
+  backBtnText: { color: '#a0c4ff', fontSize: 14 },
+  studentRow: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#0a1a2e', borderRadius: 10, padding: 12, marginBottom: 8 },
+  studentAvatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#534AB7', alignItems: 'center', justifyContent: 'center' },
+  studentAvatarText: { color: '#fff', fontWeight: 'bold', fontSize: 15 },
+  studentName: { color: '#ffffff', fontSize: 14, fontWeight: 'bold' },
+  studentReg: { color: '#a0c4ff', fontSize: 12 },
+  monitorBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#0a3d2e', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, borderWidth: 1, borderColor: '#1D9E75' },
+  monitorBadgeText: { color: '#1D9E75', fontSize: 12, fontWeight: 'bold' },
+  assignBtn: { backgroundColor: '#1D9E75', paddingHorizontal: 14, paddingVertical: 7, borderRadius: 10 },
+  assignBtnText: { color: '#fff', fontSize: 13, fontWeight: 'bold' },
+  doneBtn: { backgroundColor: '#534AB7', padding: 14, borderRadius: 12, alignItems: 'center', marginTop: 14 },
+  doneBtnText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
 });

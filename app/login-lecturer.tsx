@@ -3,13 +3,13 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { loginLecturer } from '../database/db';
+import { supabase } from '../database/supabase';
 
 export default function LecturerLogin() {
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
+  const [showPwd, setShowPwd] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -19,95 +19,132 @@ export default function LecturerLogin() {
     try {
       const saved = await AsyncStorage.getItem('lecturer_remember');
       if (saved) {
-        const data = JSON.parse(saved);
-        setEmail(data.email);
-        setPassword(data.password);
-        setRememberMe(true);
+        const { em, pw } = JSON.parse(saved);
+        setEmail(em || ''); setPassword(pw || ''); setRememberMe(true);
       }
     } catch (e) {}
   };
 
   const handleLogin = async () => {
     if (loading) return;
-    if (!email || !password) { Alert.alert('Error', 'Please enter your email and password'); return; }
+    const trimEmail = email.trim().toLowerCase();
+    const trimPwd = password.trim();
+    if (!trimEmail || !trimPwd) { Alert.alert('Missing', 'Please enter your email and password'); return; }
     setLoading(true);
     try {
-      const result = await loginLecturer(email, password);
-      if (result.success) {
-        if (rememberMe) {
-          await AsyncStorage.setItem('lecturer_remember', JSON.stringify({ email, password }));
-        } else {
-          await AsyncStorage.removeItem('lecturer_remember');
-        }
-        await AsyncStorage.setItem('current_lecturer', JSON.stringify(result.lecturer));
-        if ((result.lecturer as any).must_change_password === 1) {
-          router.push('/lecturer-change-password');
-        } else {
-          router.push('/lecturer-home');
-        }
-      } else {
-        Alert.alert('Login Failed', 'Incorrect email or password. Contact your Admin if you do not have an account.');
+      const { data, error } = await supabase
+        .from('lecturers')
+        .select('*')
+        .eq('email', trimEmail)
+        .maybeSingle();
+
+      if (error) { Alert.alert('Error', error.message); return; }
+      if (!data) { Alert.alert('Login Failed', 'Incorrect email or password. Contact your Admin if you do not have an account.'); return; }
+
+      if (data.password !== trimPwd) { Alert.alert('Login Failed', 'Incorrect email or password. Contact your Admin if you do not have an account.'); return; }
+
+      if (data.is_suspended === 1 || data.is_suspended === true) {
+        Alert.alert(
+          '🚫 Account Suspended',
+          `Your lecturer account has been suspended.\n\nReason: ${data.suspend_reason || 'No reason provided'}\n\nPlease contact the Campus IQ Admin to resolve this issue.`,
+          [{ text: 'OK' }]
+        );
+        return;
       }
-    } finally {
-      setLoading(false);
-    }
+
+      if (rememberMe) await AsyncStorage.setItem('lecturer_remember', JSON.stringify({ em: trimEmail, pw: trimPwd }));
+      else await AsyncStorage.removeItem('lecturer_remember');
+
+      await AsyncStorage.setItem('current_lecturer', JSON.stringify(data));
+
+      if (data.must_change_password === 1 || data.must_change_password === true) {
+        router.replace('/lecturer-change-password');
+      } else {
+        router.replace('/lecturer-home');
+      }
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Login failed');
+    } finally { setLoading(false); }
   };
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      <View style={styles.header}>
-        <Ionicons name="book" size={70} color="#534AB7" />
-        <Text style={styles.title}>Lecturer Login</Text>
-        <Text style={styles.subtitle}>Your account is created by the Admin</Text>
+      <View style={styles.iconBox}>
+        <Ionicons name="book" size={50} color="#534AB7" />
       </View>
-      <View style={styles.noticebox}>
-        <Ionicons name="information-circle" size={20} color="#a0c4ff" />
-        <Text style={styles.noticeText}>If you do not have an account contact your Campus IQ Administrator</Text>
-      </View>
+      <Text style={styles.title}>Lecturer Login</Text>
+      <Text style={styles.subtitle}>Your account is created by the Admin</Text>
+
       <View style={styles.inputBox}>
-        <Ionicons name="mail-outline" size={20} color="#534AB7" style={styles.inputIcon} />
-        <TextInput style={styles.input} placeholder="Staff Email" placeholderTextColor="#aaa" value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" />
+        <Ionicons name="mail-outline" size={20} color="#534AB7" style={styles.icon} />
+        <TextInput
+          style={styles.input}
+          placeholder="Email address"
+          placeholderTextColor="#aaa"
+          value={email}
+          onChangeText={setEmail}
+          keyboardType="email-address"
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
       </View>
+
       <View style={styles.inputBox}>
-        <Ionicons name="lock-closed-outline" size={20} color="#534AB7" style={styles.inputIcon} />
-        <TextInput style={styles.input} placeholder="Password" placeholderTextColor="#aaa" value={password} onChangeText={setPassword} secureTextEntry={!showPassword} />
-        <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
-          <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={20} color="#aaa" />
+        <Ionicons name="lock-closed-outline" size={20} color="#534AB7" style={styles.icon} />
+        <TextInput
+          style={styles.input}
+          placeholder="Password"
+          placeholderTextColor="#aaa"
+          value={password}
+          onChangeText={setPassword}
+          secureTextEntry={!showPwd}
+        />
+        <TouchableOpacity onPress={() => setShowPwd(!showPwd)}>
+          <Ionicons name={showPwd ? 'eye-off-outline' : 'eye-outline'} size={20} color="#aaa" />
         </TouchableOpacity>
       </View>
+
       <TouchableOpacity style={styles.rememberRow} onPress={() => setRememberMe(!rememberMe)}>
         <View style={[styles.checkbox, rememberMe && styles.checkboxChecked]}>
-          {rememberMe && <Ionicons name="checkmark" size={14} color="#ffffff" />}
+          {rememberMe && <Ionicons name="checkmark" size={14} color="#fff" />}
         </View>
         <Text style={styles.rememberText}>Remember me</Text>
       </TouchableOpacity>
+
+      <View style={styles.infoBox}>
+        <Ionicons name="information-circle-outline" size={16} color="#a0c4ff" />
+        <Text style={styles.infoText}>Use the email and password provided by your Campus IQ admin. First-time login requires a password change.</Text>
+      </View>
+
       <TouchableOpacity style={[styles.btn, loading && { opacity: 0.6 }]} onPress={handleLogin} disabled={loading}>
-        <Text style={styles.btnText}>{loading ? 'Please wait...' : 'Login'}</Text>
+        <Ionicons name="log-in-outline" size={22} color="#fff" />
+        <Text style={styles.btnText}>{loading ? 'Logging in...' : 'Login'}</Text>
       </TouchableOpacity>
-      <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+
+      <TouchableOpacity style={styles.backLink} onPress={() => router.back()}>
         <Ionicons name="arrow-back" size={18} color="#a0c4ff" />
-        <Text style={styles.backText}>Go Back</Text>
+        <Text style={styles.backLinkText}>Go Back</Text>
       </TouchableOpacity>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flexGrow: 1, backgroundColor: '#001f4d', alignItems: 'center', justifyContent: 'center', padding: 24, paddingTop: 60, paddingBottom: 40 },
-  header: { alignItems: 'center', marginBottom: 30 },
-  title: { fontSize: 28, fontWeight: 'bold', color: '#ffffff', marginTop: 10 },
-  subtitle: { fontSize: 14, color: '#a0c4ff', marginTop: 4, textAlign: 'center' },
-  noticebox: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: '#0a2a4a', borderWidth: 1, borderColor: '#534AB7', padding: 14, borderRadius: 12, marginBottom: 24, gap: 10 },
-  noticeText: { color: '#a0c4ff', fontSize: 13, flex: 1 },
-  inputBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0a2a4a', borderWidth: 1, borderColor: '#534AB7', width: '100%', padding: 14, borderRadius: 12, marginBottom: 14 },
-  inputIcon: { marginRight: 10 },
+  container: { flexGrow: 1, backgroundColor: '#001029', alignItems: 'center', justifyContent: 'center', padding: 24, paddingTop: 60, paddingBottom: 40 },
+  iconBox: { width: 100, height: 100, borderRadius: 50, backgroundColor: '#1a1650', alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: '#534AB7', marginBottom: 16 },
+  title: { fontSize: 28, fontWeight: 'bold', color: '#ffffff', textAlign: 'center' },
+  subtitle: { fontSize: 14, color: '#a0c4ff', marginTop: 4, marginBottom: 24, textAlign: 'center' },
+  inputBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0a1a2e', borderWidth: 1, borderColor: '#534AB7', width: '100%', padding: 14, borderRadius: 12, marginBottom: 14 },
+  icon: { marginRight: 10 },
   input: { flex: 1, fontSize: 15, color: '#ffffff' },
   rememberRow: { flexDirection: 'row', alignItems: 'center', gap: 10, width: '100%', marginBottom: 16 },
   checkbox: { width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: '#534AB7', alignItems: 'center', justifyContent: 'center' },
   checkboxChecked: { backgroundColor: '#534AB7' },
   rememberText: { color: '#a0c4ff', fontSize: 14 },
-  btn: { backgroundColor: '#534AB7', width: '100%', padding: 18, borderRadius: 12, alignItems: 'center', marginBottom: 16, marginTop: 8 },
+  infoBox: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: '#0a1a2e', borderWidth: 1, borderColor: '#2a3a5a', borderRadius: 10, padding: 12, marginBottom: 20, gap: 8, width: '100%' },
+  infoText: { color: '#a0c4ff', fontSize: 12, flex: 1, lineHeight: 18 },
+  btn: { backgroundColor: '#534AB7', width: '100%', padding: 18, borderRadius: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 16 },
   btnText: { color: '#ffffff', fontSize: 18, fontWeight: 'bold' },
-  backBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
-  backText: { color: '#a0c4ff', fontSize: 14 },
+  backLink: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  backLinkText: { color: '#a0c4ff', fontSize: 14 },
 });

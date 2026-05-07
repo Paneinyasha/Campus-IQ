@@ -19,126 +19,165 @@ export default function LostFound() {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState('all');
   const [loading, setLoading] = useState(false);
-  const [uploading, setUploading] = useState(false);
-
-  // Form fields
   const [itemName, setItemName] = useState('');
-  const [itemCategory, setItemCategory] = useState('');
+  const [itemCategory, setItemCategory] = useState('Other');
   const [foundAt, setFoundAt] = useState('');
   const [submittedTo, setSubmittedTo] = useState('');
   const [contact, setContact] = useState('');
   const [staffId, setStaffId] = useState('');
   const [office, setOffice] = useState('');
   const [imageUri, setImageUri] = useState('');
-  const [imageUrl, setImageUrl] = useState('');
 
   const CATEGORIES = ['Electronics', 'Clothing', 'Books', 'Documents', 'Keys', 'Bag', 'Wallet', 'Other'];
 
   useEffect(() => { loadUser(); loadItems(); }, []);
 
   const loadUser = async () => {
-    const student = await AsyncStorage.getItem('current_student');
-    const lecturer = await AsyncStorage.getItem('current_lecturer');
-    const admin = await AsyncStorage.getItem('current_admin');
-    if (admin) { setCurrentUser(JSON.parse(admin)); setUserType('admin'); }
-    else if (lecturer) { setCurrentUser(JSON.parse(lecturer)); setUserType('lecturer'); }
-    else if (student) { setCurrentUser(JSON.parse(student)); setUserType('student'); }
+    try {
+      const admin = await AsyncStorage.getItem('current_admin');
+      const lecturer = await AsyncStorage.getItem('current_lecturer');
+      const student = await AsyncStorage.getItem('current_student');
+      if (admin) { setCurrentUser(JSON.parse(admin)); setUserType('admin'); }
+      else if (lecturer) { setCurrentUser(JSON.parse(lecturer)); setUserType('lecturer'); }
+      else if (student) { setCurrentUser(JSON.parse(student)); setUserType('student'); }
+    } catch (e) {}
   };
 
   const loadItems = async () => {
-    const { data } = await supabase.from('lost_found').select('*').order('created_at', { ascending: false });
-    setItems(data || []);
+    try {
+      const { data, error } = await supabase.from('lost_found').select('*').order('created_at', { ascending: false });
+      if (error) { console.log('loadItems:', error.message); return; }
+      setItems(data || []);
+    } catch (e) {}
   };
 
+  // Helper to get the real item name regardless of column name
+  const getItemName = (item: any) => item.item_name || item.title || item.name || '';
+  const getLocation = (item: any) => item.found_at || item.location || item.place || '';
+
   const pickImage = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.8 });
-    if (!result.canceled && result.assets?.[0]) {
-      setImageUri(result.assets[0].uri);
-    }
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') { Alert.alert('Permission needed', 'Allow access to photos'); return; }
+      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.7 });
+      if (!result.canceled && result.assets?.[0]) setImageUri(result.assets[0].uri);
+    } catch (e) {}
   };
 
   const uploadImage = async (uri: string): Promise<string> => {
     try {
-      const ext = uri.split('.').pop() || 'jpg';
+      const ext = uri.split('.').pop()?.split('?')[0] || 'jpg';
       const path = `lost-found/${Date.now()}.${ext}`;
-      const response = await fetch(uri);
-      const blob = await response.blob();
+      const resp = await fetch(uri);
+      const blob = await resp.blob();
       const { error } = await supabase.storage.from('campus-iq').upload(path, blob, { contentType: 'image/jpeg' });
-      if (error) return '';
+      if (error) { console.log('upload image error:', error.message); return ''; }
       const { data } = supabase.storage.from('campus-iq').getPublicUrl(path);
       return data.publicUrl;
     } catch (e) { return ''; }
   };
 
+  const resetForm = () => {
+    setItemName(''); setItemCategory('Other'); setFoundAt('');
+    setSubmittedTo(''); setContact(''); setStaffId(''); setOffice(''); setImageUri('');
+  };
+
   const handleSubmit = async () => {
-    if (!itemName || !foundAt || !contact) { Alert.alert('Missing', 'Please fill in item name, found at location, and contact info'); return; }
+    if (!itemName.trim()) { Alert.alert('Missing', 'Item name is required'); return; }
+    if (!foundAt.trim()) { Alert.alert('Missing', 'Found at location is required'); return; }
     setLoading(true);
     try {
       let finalImageUrl = '';
-      if (imageUri) {
-        setUploading(true);
-        finalImageUrl = await uploadImage(imageUri);
-        setUploading(false);
+      if (imageUri) finalImageUrl = await uploadImage(imageUri);
+
+      const reporterName = currentUser?.name
+        ? `${currentUser.name} ${currentUser.surname || ''}`.trim()
+        : 'Unknown';
+
+      // Insert both title and item_name so whichever column exists will work
+      const basePayload: any = {
+        title: itemName.trim(),
+        item_name: itemName.trim(),
+        name: itemName.trim(),
+        found_at: foundAt.trim(),
+        location: foundAt.trim(),
+        category: itemCategory,
+        reported_by: reporterName,
+        status: 'unclaimed',
+      };
+      if (submittedTo.trim()) basePayload.submitted_to = submittedTo.trim();
+      if (contact.trim()) basePayload.contact = contact.trim();
+      if (staffId.trim()) basePayload.staff_id = staffId.trim();
+      if (office.trim()) basePayload.office = office.trim();
+      if (finalImageUrl) basePayload.image_url = finalImageUrl;
+
+      // Try inserting, strip problematic columns on error
+      let { error } = await supabase.from('lost_found').insert(basePayload);
+      if (error) {
+        console.log('first attempt error:', error.message);
+        // Extract column name from error and remove it
+        const match = error.message.match(/"([^"]+)"/);
+        if (match) delete basePayload[match[1]];
+        const r2 = await supabase.from('lost_found').insert(basePayload);
+        if (r2.error) {
+          // Try with minimal payload
+          const minPayload: any = {
+            item_name: itemName.trim(),
+            found_at: foundAt.trim(),
+            category: itemCategory,
+            reported_by: reporterName,
+            status: 'unclaimed',
+          };
+          if (finalImageUrl) minPayload.image_url = finalImageUrl;
+          const r3 = await supabase.from('lost_found').insert(minPayload);
+          if (r3.error) throw r3.error;
+        }
       }
 
-      const reporterName = currentUser?.name || 'Anonymous';
-      const { error } = await supabase.from('lost_found').insert({
-        item_name: itemName.trim(),
-        category: itemCategory || 'Other',
-        found_at: foundAt.trim(),
-        submitted_to: submittedTo.trim(),
-        contact: contact.trim(),
-        staff_id: staffId.trim(),
-        office: office.trim(),
-        reported_by: reporterName,
-        image_url: finalImageUrl || null,
-        status: 'unclaimed',
-      });
-
-      if (error) throw error;
-      Alert.alert('Submitted!', 'Lost item reported successfully.');
-      setItemName(''); setItemCategory(''); setFoundAt(''); setSubmittedTo('');
-      setContact(''); setStaffId(''); setOffice(''); setImageUri(''); setImageUrl('');
-      setShowForm(false);
-      loadItems();
+      Alert.alert('✅ Submitted!', 'Lost item reported successfully.');
+      resetForm(); setShowForm(false); loadItems();
     } catch (e: any) {
-      Alert.alert('Error', e.message);
-    } finally { setLoading(false); setUploading(false); }
+      Alert.alert('Error', e.message || 'Could not submit');
+    } finally { setLoading(false); }
   };
 
   const markClaimed = async (id: string) => {
     await supabase.from('lost_found').update({ status: 'claimed' }).eq('id', id);
-    loadItems();
-    setShowDetail(null);
+    loadItems(); setShowDetail(null);
   };
 
   const deleteItem = (item: any) => {
-    Alert.alert('Delete', `Remove "${item.item_name}"?`, [
+    Alert.alert('Delete', 'Remove this item report?', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: async () => { await supabase.from('lost_found').delete().eq('id', item.id); loadItems(); } }
+      {
+        text: 'Delete', style: 'destructive', onPress: async () => {
+          await supabase.from('lost_found').delete().eq('id', item.id);
+          loadItems(); setShowDetail(null);
+        }
+      }
     ]);
   };
 
   const filtered = items.filter(i => {
-    const matchSearch = i.item_name?.toLowerCase().includes(searchQuery.toLowerCase()) || i.found_at?.toLowerCase().includes(searchQuery.toLowerCase()) || i.category?.toLowerCase().includes(searchQuery.toLowerCase());
-    if (activeFilter === 'all') return matchSearch;
-    return matchSearch && i.status === activeFilter;
+    const s = `${getItemName(i)} ${getLocation(i)} ${i.category || ''}`.toLowerCase();
+    const match = s.includes(searchQuery.toLowerCase());
+    return activeFilter === 'all' ? match : match && i.status === activeFilter;
   });
 
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="#ffffff" /></TouchableOpacity>
+        <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="#fff" /></TouchableOpacity>
         <Text style={styles.title}>Lost & Found</Text>
-        <TouchableOpacity onPress={() => setShowForm(!showForm)}>
+        <TouchableOpacity onPress={() => { setShowForm(!showForm); if (showForm) resetForm(); }}>
           <Ionicons name={showForm ? 'close' : 'add'} size={26} color="#FFD700" />
         </TouchableOpacity>
       </View>
 
       <View style={styles.filterRow}>
         {['all', 'unclaimed', 'claimed'].map(f => (
-          <TouchableOpacity key={f} style={[styles.filterBtn, activeFilter === f && styles.filterBtnActive]} onPress={() => setActiveFilter(f)}>
-            <Text style={[styles.filterBtnText, activeFilter === f && styles.filterBtnTextActive]}>
+          <TouchableOpacity key={f} style={[styles.fBtn, activeFilter === f && styles.fBtnActive]} onPress={() => setActiveFilter(f)}>
+            <Text style={[styles.fBtnText, activeFilter === f && styles.fBtnTextActive]}>
               {f.charAt(0).toUpperCase() + f.slice(1)}
             </Text>
           </TouchableOpacity>
@@ -148,27 +187,36 @@ export default function LostFound() {
 
       <View style={styles.searchBox}>
         <Ionicons name="search-outline" size={18} color="#a0c4ff" />
-        <TextInput style={styles.searchInput} placeholder="Search items..." placeholderTextColor="#aaa" value={searchQuery} onChangeText={setSearchQuery} />
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search items..."
+          placeholderTextColor="#aaa"
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+        />
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
+      <ScrollView contentContainerStyle={{ padding: 14, paddingBottom: 40 }}>
         {showForm && (
           <View style={styles.form}>
-            <Text style={styles.formTitle}>Report Lost Item</Text>
+            <Text style={styles.formTitle}>Report Found Item</Text>
 
-            <TouchableOpacity style={styles.imagePicker} onPress={pickImage}>
+            <TouchableOpacity style={styles.imgPicker} onPress={pickImage}>
               {imageUri ? (
                 <View>
-                  <Image source={{ uri: imageUri }} style={styles.imagePreview} resizeMode="cover" />
-                  <TouchableOpacity style={styles.changeImageBtn} onPress={() => setImageUri('')}>
-                    <Ionicons name="close-circle" size={22} color="#D85A30" />
-                    <Text style={styles.changeImageText}>Remove photo</Text>
+                  <Image source={{ uri: imageUri }} style={{ width: '100%', height: 180 }} resizeMode="cover" />
+                  <TouchableOpacity
+                    style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, padding: 8, backgroundColor: '#0a1a2e' }}
+                    onPress={() => setImageUri('')}
+                  >
+                    <Ionicons name="close-circle" size={20} color="#D85A30" />
+                    <Text style={{ color: '#D85A30', fontSize: 13 }}>Remove photo</Text>
                   </TouchableOpacity>
                 </View>
               ) : (
-                <View style={styles.imagePickerInner}>
+                <View style={{ alignItems: 'center', padding: 24, gap: 8 }}>
                   <Ionicons name="camera-outline" size={32} color="#534AB7" />
-                  <Text style={styles.imagePickerText}>Tap to add photo (optional)</Text>
+                  <Text style={{ color: '#a0c4ff', fontSize: 14 }}>Tap to add photo (optional)</Text>
                 </View>
               )}
             </TouchableOpacity>
@@ -177,67 +225,79 @@ export default function LostFound() {
               { ph: 'Item Name *', val: itemName, set: setItemName },
               { ph: 'Found At (location) *', val: foundAt, set: setFoundAt },
               { ph: 'Submitted To (office/person)', val: submittedTo, set: setSubmittedTo },
-              { ph: 'Contact (phone/email) *', val: contact, set: setContact },
+              { ph: 'Contact (phone/email)', val: contact, set: setContact },
               { ph: 'Your Staff/Student ID', val: staffId, set: setStaffId },
               { ph: 'Your Office/Room Number', val: office, set: setOffice },
             ].map((f, i) => (
               <View key={i} style={styles.inputBox}>
-                <TextInput style={styles.input} placeholder={f.ph} placeholderTextColor="#aaa" value={f.val} onChangeText={f.set} />
+                <TextInput style={styles.input} placeholder={f.ph} placeholderTextColor="#666" value={f.val} onChangeText={f.set} />
               </View>
             ))}
 
             <Text style={styles.catLabel}>Category</Text>
-            <View style={styles.catRow}>
+            <View style={styles.catWrap}>
               {CATEGORIES.map(cat => (
-                <TouchableOpacity key={cat} style={[styles.catBtn, itemCategory === cat && styles.catBtnActive]} onPress={() => setItemCategory(cat)}>
+                <TouchableOpacity
+                  key={cat}
+                  style={[styles.catBtn, itemCategory === cat && styles.catBtnActive]}
+                  onPress={() => setItemCategory(cat)}
+                >
                   <Text style={[styles.catBtnText, itemCategory === cat && styles.catBtnTextActive]}>{cat}</Text>
                 </TouchableOpacity>
               ))}
             </View>
 
             <View style={styles.formBtns}>
-              <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowForm(false)}>
+              <TouchableOpacity style={styles.cancelBtn} onPress={() => { setShowForm(false); resetForm(); }}>
                 <Text style={styles.cancelBtnText}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.submitBtn, (loading || uploading) && { opacity: 0.6 }]} onPress={handleSubmit} disabled={loading || uploading}>
-                <Text style={styles.submitBtnText}>{uploading ? 'Uploading...' : loading ? 'Submitting...' : 'Submit Report'}</Text>
+              <TouchableOpacity style={[styles.submitBtn, loading && { opacity: 0.6 }]} onPress={handleSubmit} disabled={loading}>
+                <Text style={styles.submitBtnText}>{loading ? 'Submitting...' : 'Submit Report'}</Text>
               </TouchableOpacity>
             </View>
           </View>
         )}
 
-        {filtered.length === 0 ? (
+        {filtered.length === 0 && !showForm ? (
           <View style={styles.emptyBox}>
             <Ionicons name="search-outline" size={60} color="#534AB7" />
             <Text style={styles.emptyTitle}>No Items Found</Text>
-            <Text style={styles.emptyText}>Tap + to report a lost item</Text>
+            <Text style={styles.emptyText}>Tap + to report a found item</Text>
           </View>
         ) : (
           filtered.map((item: any) => (
-            <TouchableOpacity key={item.id} style={[styles.itemCard, item.status === 'claimed' && styles.itemCardClaimed]} onPress={() => setShowDetail(item)}>
-              {/* Show image if available */}
+            <TouchableOpacity
+              key={item.id}
+              style={[styles.itemCard, item.status === 'claimed' && { opacity: 0.7 }]}
+              onPress={() => setShowDetail(item)}
+            >
               {item.image_url ? (
-                <Image source={{ uri: item.image_url }} style={styles.itemCardImage} resizeMode="cover" />
+                <Image source={{ uri: item.image_url }} style={styles.itemImg} resizeMode="cover" />
               ) : (
-                <View style={styles.itemCardNoImage}>
-                  <Ionicons name="image-outline" size={28} color="#534AB7" />
+                <View style={styles.itemNoImg}>
+                  <Ionicons name="image-outline" size={26} color="#534AB7" />
                 </View>
               )}
-              <View style={styles.itemCardInfo}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                  <View style={[styles.statusBadge, { backgroundColor: item.status === 'claimed' ? '#0a3d2e' : '#3d1a0a', borderColor: item.status === 'claimed' ? '#1D9E75' : '#D85A30' }]}>
-                    <Text style={[styles.statusBadgeText, { color: item.status === 'claimed' ? '#1D9E75' : '#D85A30' }]}>{item.status?.toUpperCase()}</Text>
+              <View style={styles.itemInfo}>
+                <View style={{ flexDirection: 'row', gap: 6, marginBottom: 4, flexWrap: 'wrap' }}>
+                  <View style={[styles.itemStatus, {
+                    borderColor: item.status === 'claimed' ? '#1D9E75' : '#D85A30',
+                    backgroundColor: item.status === 'claimed' ? '#0a3d2e' : '#3d1a0a'
+                  }]}>
+                    <Text style={[styles.itemStatusText, { color: item.status === 'claimed' ? '#1D9E75' : '#D85A30' }]}>
+                      {(item.status || 'unclaimed').toUpperCase()}
+                    </Text>
                   </View>
-                  {item.category && <Text style={styles.categoryText}>{item.category}</Text>}
+                  {item.category && <Text style={styles.itemCat}>{item.category}</Text>}
                 </View>
-                <Text style={styles.itemName}>{item.item_name}</Text>
+                <Text style={styles.itemName}>{getItemName(item)}</Text>
                 <View style={styles.itemMeta}>
                   <Ionicons name="location-outline" size={13} color="#a0c4ff" />
-                  <Text style={styles.itemMetaText}>{item.found_at}</Text>
+                  <Text style={styles.itemMetaTxt}>{getLocation(item)}</Text>
                 </View>
                 <View style={styles.itemMeta}>
                   <Ionicons name="person-outline" size={13} color="#a0c4ff" />
-                  <Text style={styles.itemMetaText}>By {item.reported_by} · {new Date(item.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</Text>
+                  <Text style={styles.itemMetaTxt}>By {item.reported_by}</Text>
                 </View>
               </View>
             </TouchableOpacity>
@@ -245,67 +305,91 @@ export default function LostFound() {
         )}
       </ScrollView>
 
-      {/* Item Detail Modal */}
+      {/* Detail Modal — with full image display */}
       <Modal visible={!!showDetail} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           {showDetail && (
             <View style={styles.modalBox}>
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>Item Details</Text>
-                <TouchableOpacity onPress={() => setShowDetail(null)}><Ionicons name="close" size={26} color="#ffffff" /></TouchableOpacity>
+                <TouchableOpacity onPress={() => setShowDetail(null)}>
+                  <Ionicons name="close" size={26} color="#fff" />
+                </TouchableOpacity>
               </View>
-
               <ScrollView showsVerticalScrollIndicator={false}>
-                {/* Image display */}
+
+                {/* IMAGE — full display at top of modal */}
                 {showDetail.image_url ? (
-                  <Image source={{ uri: showDetail.image_url }} style={styles.modalImage} resizeMode="cover" />
+                  <View>
+                    <Image
+                      source={{ uri: showDetail.image_url }}
+                      style={{ width: '100%', height: 240 }}
+                      resizeMode="cover"
+                    />
+                    <View style={{ backgroundColor: 'rgba(0,0,0,0.5)', padding: 8, alignItems: 'center' }}>
+                      <Text style={{ color: '#a0c4ff', fontSize: 11 }}>📷 Photo of the item</Text>
+                    </View>
+                  </View>
                 ) : (
-                  <View style={styles.modalNoImage}>
+                  <View style={{ height: 120, backgroundColor: '#0a1a2e', alignItems: 'center', justifyContent: 'center' }}>
                     <Ionicons name="image-outline" size={48} color="#534AB7" />
-                    <Text style={styles.modalNoImageText}>No photo</Text>
+                    <Text style={{ color: '#a0c4ff', marginTop: 8 }}>No photo attached</Text>
                   </View>
                 )}
 
-                <View style={[styles.statusBadge, { alignSelf: 'flex-start', margin: 16, marginBottom: 8, backgroundColor: showDetail.status === 'claimed' ? '#0a3d2e' : '#3d1a0a', borderColor: showDetail.status === 'claimed' ? '#1D9E75' : '#D85A30' }]}>
-                  <Text style={[styles.statusBadgeText, { color: showDetail.status === 'claimed' ? '#1D9E75' : '#D85A30' }]}>{showDetail.status?.toUpperCase()}</Text>
-                </View>
+                <View style={{ padding: 16 }}>
+                  <View style={[styles.itemStatus, {
+                    alignSelf: 'flex-start', marginBottom: 10,
+                    borderColor: showDetail.status === 'claimed' ? '#1D9E75' : '#D85A30',
+                    backgroundColor: showDetail.status === 'claimed' ? '#0a3d2e' : '#3d1a0a'
+                  }]}>
+                    <Text style={[styles.itemStatusText, { color: showDetail.status === 'claimed' ? '#1D9E75' : '#D85A30' }]}>
+                      {(showDetail.status || 'unclaimed').toUpperCase()}
+                    </Text>
+                  </View>
 
-                <Text style={styles.modalItemName}>{showDetail.item_name}</Text>
-                {showDetail.category && <Text style={styles.modalCategory}>{showDetail.category}</Text>}
+                  <Text style={styles.modalItemName}>{getItemName(showDetail)}</Text>
+                  {showDetail.category && <Text style={styles.modalItemCat}>{showDetail.category}</Text>}
 
-                <View style={styles.detailsList}>
                   {[
-                    { icon: 'location-outline', label: 'Found At', value: showDetail.found_at },
-                    { icon: 'business-outline', label: 'Submitted To', value: showDetail.submitted_to },
-                    { icon: 'call-outline', label: 'Contact', value: showDetail.contact },
-                    { icon: 'card-outline', label: 'Staff ID', value: showDetail.staff_id },
-                    { icon: 'home-outline', label: 'Office', value: showDetail.office },
-                    { icon: 'person-outline', label: 'Reported By', value: showDetail.reported_by },
-                    { icon: 'calendar-outline', label: 'Date Reported', value: new Date(showDetail.created_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) },
-                  ].filter(d => d.value).map((d, i) => (
+                    { icon: 'location-outline', label: 'Found At', val: getLocation(showDetail) },
+                    { icon: 'business-outline', label: 'Submitted To', val: showDetail.submitted_to },
+                    { icon: 'call-outline', label: 'Contact', val: showDetail.contact },
+                    { icon: 'card-outline', label: 'Staff/Student ID', val: showDetail.staff_id },
+                    { icon: 'home-outline', label: 'Office', val: showDetail.office },
+                    { icon: 'person-outline', label: 'Reported By', val: showDetail.reported_by },
+                    {
+                      icon: 'calendar-outline', label: 'Date Reported',
+                      val: showDetail.created_at ? new Date(showDetail.created_at).toLocaleString('en-GB', {
+                        day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
+                      }) : ''
+                    },
+                  ].filter(d => d.val).map((d, i) => (
                     <View key={i} style={styles.detailRow}>
-                      <View style={styles.detailIcon}><Ionicons name={d.icon as any} size={18} color="#1D9E75" /></View>
+                      <View style={styles.detailIcon}>
+                        <Ionicons name={d.icon as any} size={18} color="#1D9E75" />
+                      </View>
                       <View style={{ flex: 1 }}>
                         <Text style={styles.detailLabel}>{d.label}</Text>
-                        <Text style={styles.detailValue}>{d.value}</Text>
+                        <Text style={styles.detailVal}>{d.val}</Text>
                       </View>
                     </View>
                   ))}
-                </View>
 
-                <View style={styles.modalActions}>
-                  {showDetail.status === 'unclaimed' && (
-                    <TouchableOpacity style={styles.claimedBtn} onPress={() => markClaimed(showDetail.id)}>
-                      <Ionicons name="checkmark-circle-outline" size={20} color="#fff" />
-                      <Text style={styles.claimedBtnText}>Mark as Claimed</Text>
-                    </TouchableOpacity>
-                  )}
-                  {(userType === 'admin' || userType === 'lecturer') && (
-                    <TouchableOpacity style={styles.deleteItemBtn} onPress={() => deleteItem(showDetail)}>
-                      <Ionicons name="trash-outline" size={20} color="#fff" />
-                      <Text style={styles.deleteItemBtnText}>Delete Report</Text>
-                    </TouchableOpacity>
-                  )}
+                  <View style={{ gap: 10, marginTop: 10 }}>
+                    {showDetail.status === 'unclaimed' && (
+                      <TouchableOpacity style={styles.claimBtn} onPress={() => markClaimed(showDetail.id)}>
+                        <Ionicons name="checkmark-circle-outline" size={20} color="#fff" />
+                        <Text style={styles.claimBtnText}>Mark as Claimed</Text>
+                      </TouchableOpacity>
+                    )}
+                    {(userType === 'admin' || userType === 'lecturer') && (
+                      <TouchableOpacity style={styles.deleteBtn} onPress={() => deleteItem(showDetail)}>
+                        <Ionicons name="trash-outline" size={20} color="#fff" />
+                        <Text style={styles.deleteBtnText}>Delete Report</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
                 </View>
               </ScrollView>
             </View>
@@ -317,69 +401,58 @@ export default function LostFound() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#001f4d' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#0a2a4a', padding: 16, paddingTop: 60, borderBottomWidth: 1, borderBottomColor: '#534AB7' },
+  container: { flex: 1, backgroundColor: '#001029' },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#0a1a2e', padding: 16, paddingTop: 60, borderBottomWidth: 1, borderBottomColor: '#2a3a5a' },
   title: { fontSize: 20, fontWeight: 'bold', color: '#FFD700' },
-  filterRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 10, backgroundColor: '#0a2a4a' },
-  filterBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20, borderWidth: 1, borderColor: '#534AB7' },
-  filterBtnActive: { backgroundColor: '#534AB7' },
-  filterBtnText: { color: '#a0c4ff', fontSize: 13 },
-  filterBtnTextActive: { color: '#ffffff', fontWeight: 'bold' },
+  filterRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: '#0a1a2e' },
+  fBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20, borderWidth: 1, borderColor: '#2a3a5a' },
+  fBtnActive: { backgroundColor: '#534AB7', borderColor: '#534AB7' },
+  fBtnText: { color: '#a0c4ff', fontSize: 13 },
+  fBtnTextActive: { color: '#fff', fontWeight: 'bold' },
   countText: { color: '#7a9cc4', fontSize: 12, marginLeft: 'auto' },
-  searchBox: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#0a2a4a', padding: 12, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#1a2a3a' },
-  searchInput: { flex: 1, fontSize: 14, color: '#ffffff' },
-  form: { backgroundColor: '#0a2a4a', borderWidth: 1, borderColor: '#534AB7', borderRadius: 14, padding: 16, marginBottom: 16 },
+  searchBox: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#0a1a2e', padding: 12, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: '#1a2a3a' },
+  searchInput: { flex: 1, fontSize: 14, color: '#fff' },
+  form: { backgroundColor: '#0a1a2e', borderWidth: 1, borderColor: '#2a3a5a', borderRadius: 16, padding: 16, marginBottom: 16 },
   formTitle: { fontSize: 16, fontWeight: 'bold', color: '#FFD700', marginBottom: 14 },
-  imagePicker: { backgroundColor: '#001f4d', borderWidth: 2, borderColor: '#534AB7', borderRadius: 12, borderStyle: 'dashed', marginBottom: 12, overflow: 'hidden' },
-  imagePickerInner: { alignItems: 'center', padding: 24, gap: 8 },
-  imagePickerText: { color: '#a0c4ff', fontSize: 14 },
-  imagePreview: { width: '100%', height: 180 },
-  changeImageBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, padding: 8, backgroundColor: '#0a2a4a' },
-  changeImageText: { color: '#D85A30', fontSize: 13 },
-  inputBox: { backgroundColor: '#001f4d', borderWidth: 1, borderColor: '#534AB7', borderRadius: 10, padding: 12, marginBottom: 10 },
-  input: { fontSize: 14, color: '#ffffff' },
+  imgPicker: { backgroundColor: '#001029', borderWidth: 2, borderColor: '#2a3a5a', borderRadius: 12, borderStyle: 'dashed', marginBottom: 12, overflow: 'hidden', minHeight: 100 },
+  inputBox: { backgroundColor: '#001029', borderWidth: 1, borderColor: '#2a3a5a', borderRadius: 10, padding: 13, marginBottom: 10 },
+  input: { fontSize: 14, color: '#fff' },
   catLabel: { color: '#a0c4ff', fontSize: 13, fontWeight: 'bold', marginBottom: 8 },
-  catRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 14 },
-  catBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, borderWidth: 1, borderColor: '#534AB7' },
-  catBtnActive: { backgroundColor: '#534AB7' },
+  catWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 14 },
+  catBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, borderWidth: 1, borderColor: '#2a3a5a' },
+  catBtnActive: { backgroundColor: '#534AB7', borderColor: '#534AB7' },
   catBtnText: { color: '#a0c4ff', fontSize: 12 },
-  catBtnTextActive: { color: '#ffffff', fontWeight: 'bold' },
-  formBtns: { flexDirection: 'row', gap: 12 },
-  cancelBtn: { flex: 1, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: '#534AB7', alignItems: 'center' },
-  cancelBtnText: { color: '#a0c4ff', fontWeight: 'bold' },
-  submitBtn: { flex: 2, backgroundColor: '#534AB7', padding: 14, borderRadius: 12, alignItems: 'center' },
-  submitBtnText: { color: '#ffffff', fontWeight: 'bold', fontSize: 15 },
+  catBtnTextActive: { color: '#fff', fontWeight: 'bold' },
+  formBtns: { flexDirection: 'row', gap: 10 },
+  cancelBtn: { flex: 1, padding: 13, borderRadius: 12, borderWidth: 1, borderColor: '#2a3a5a', alignItems: 'center' },
+  cancelBtnText: { color: '#a0c4ff', fontWeight: '600' },
+  submitBtn: { flex: 2, backgroundColor: '#534AB7', padding: 13, borderRadius: 12, alignItems: 'center' },
+  submitBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 15 },
   emptyBox: { alignItems: 'center', paddingTop: 60, gap: 12 },
-  emptyTitle: { fontSize: 20, fontWeight: 'bold', color: '#ffffff' },
+  emptyTitle: { fontSize: 20, fontWeight: 'bold', color: '#fff' },
   emptyText: { fontSize: 14, color: '#a0c4ff', textAlign: 'center' },
-  itemCard: { backgroundColor: '#0a2a4a', borderWidth: 1, borderColor: '#534AB7', borderRadius: 14, marginBottom: 12, flexDirection: 'row', overflow: 'hidden' },
-  itemCardClaimed: { opacity: 0.7 },
-  itemCardImage: { width: 90, height: 90 },
-  itemCardNoImage: { width: 90, height: 90, backgroundColor: '#1a1650', alignItems: 'center', justifyContent: 'center' },
-  itemCardInfo: { flex: 1, padding: 12 },
-  statusBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, borderWidth: 1 },
-  statusBadgeText: { fontSize: 10, fontWeight: 'bold' },
-  categoryText: { color: '#a0c4ff', fontSize: 11 },
-  itemName: { fontSize: 15, fontWeight: 'bold', color: '#ffffff', marginBottom: 4 },
+  itemCard: { flexDirection: 'row', backgroundColor: '#0a1a2e', borderWidth: 1, borderColor: '#2a3a5a', borderRadius: 14, marginBottom: 12, overflow: 'hidden' },
+  itemImg: { width: 86, height: 86 },
+  itemNoImg: { width: 86, height: 86, backgroundColor: '#1a1650', alignItems: 'center', justifyContent: 'center' },
+  itemInfo: { flex: 1, padding: 12 },
+  itemStatus: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, borderWidth: 1 },
+  itemStatusText: { fontSize: 10, fontWeight: 'bold' },
+  itemCat: { color: '#a0c4ff', fontSize: 11 },
+  itemName: { fontSize: 15, fontWeight: 'bold', color: '#fff', marginBottom: 4 },
   itemMeta: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
-  itemMetaText: { color: '#a0c4ff', fontSize: 12 },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'flex-end' },
-  modalBox: { backgroundColor: '#001f4d', borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: '92%' },
+  itemMetaTxt: { color: '#a0c4ff', fontSize: 12 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'flex-end' },
+  modalBox: { backgroundColor: '#001029', borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: '93%' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, paddingBottom: 12 },
   modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#FFD700' },
-  modalImage: { width: '100%', height: 220 },
-  modalNoImage: { height: 120, backgroundColor: '#0a2a4a', alignItems: 'center', justifyContent: 'center', gap: 8 },
-  modalNoImageText: { color: '#a0c4ff', fontSize: 13 },
-  modalItemName: { fontSize: 22, fontWeight: 'bold', color: '#ffffff', paddingHorizontal: 16, marginBottom: 4 },
-  modalCategory: { fontSize: 13, color: '#a0c4ff', paddingHorizontal: 16, marginBottom: 12 },
-  detailsList: { padding: 16, paddingTop: 0 },
-  detailRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, backgroundColor: '#0a2a4a', borderRadius: 12, padding: 12, marginBottom: 8 },
-  detailIcon: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#001f4d', alignItems: 'center', justifyContent: 'center' },
+  modalItemName: { fontSize: 22, fontWeight: 'bold', color: '#fff', marginBottom: 4 },
+  modalItemCat: { fontSize: 13, color: '#a0c4ff', marginBottom: 12 },
+  detailRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, backgroundColor: '#0a1a2e', borderRadius: 12, padding: 12, marginBottom: 8 },
+  detailIcon: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#001029', alignItems: 'center', justifyContent: 'center' },
   detailLabel: { color: '#a0c4ff', fontSize: 11, marginBottom: 2 },
-  detailValue: { color: '#ffffff', fontSize: 14, fontWeight: '600' },
-  modalActions: { padding: 16, paddingTop: 8, gap: 10 },
-  claimedBtn: { backgroundColor: '#1D9E75', padding: 14, borderRadius: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
-  claimedBtnText: { color: '#ffffff', fontWeight: 'bold', fontSize: 15 },
-  deleteItemBtn: { backgroundColor: '#D85A30', padding: 14, borderRadius: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
-  deleteItemBtnText: { color: '#ffffff', fontWeight: 'bold', fontSize: 15 },
+  detailVal: { color: '#fff', fontSize: 14, fontWeight: '600' },
+  claimBtn: { backgroundColor: '#1D9E75', padding: 14, borderRadius: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
+  claimBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 15 },
+  deleteBtn: { backgroundColor: '#D85A30', padding: 14, borderRadius: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
+  deleteBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 15 },
 });
