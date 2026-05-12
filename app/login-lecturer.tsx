@@ -12,36 +12,41 @@ export default function LecturerLogin() {
   const [showPwd, setShowPwd] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [emailError, setEmailError] = useState('');
 
   useEffect(() => { checkRemembered(); }, []);
 
   const checkRemembered = async () => {
     try {
       const saved = await AsyncStorage.getItem('lecturer_remember');
-      if (saved) {
-        const { em, pw } = JSON.parse(saved);
-        setEmail(em || ''); setPassword(pw || ''); setRememberMe(true);
-      }
+      if (saved) { const { em, pw } = JSON.parse(saved); setEmail(em || ''); setPassword(pw || ''); setRememberMe(true); }
     } catch (e) {}
+  };
+
+  const validateEmail = (e: string) => {
+    if (!e.trim()) return 'Email is required';
+    if (!e.includes('@')) return 'Enter a valid email address';
+    if (!e.includes('.')) return 'Enter a valid email address';
+    return '';
   };
 
   const handleLogin = async () => {
     if (loading) return;
-    const trimEmail = email.trim().toLowerCase();
-    const trimPwd = password.trim();
-    if (!trimEmail || !trimPwd) { Alert.alert('Missing', 'Please enter your email and password'); return; }
+    const eErr = validateEmail(email.trim());
+    if (eErr) { setEmailError(eErr); Alert.alert('Invalid Email', eErr); return; }
+    if (!password.trim()) { Alert.alert('Missing', 'Please enter your password'); return; }
+
     setLoading(true);
     try {
       const { data, error } = await supabase
         .from('lecturers')
         .select('*')
-        .eq('email', trimEmail)
+        .eq('email', email.trim().toLowerCase())
         .maybeSingle();
 
       if (error) { Alert.alert('Error', error.message); return; }
       if (!data) { Alert.alert('Login Failed', 'Incorrect email or password. Contact your Admin if you do not have an account.'); return; }
-
-      if (data.password !== trimPwd) { Alert.alert('Login Failed', 'Incorrect email or password. Contact your Admin if you do not have an account.'); return; }
+      if (data.password !== password.trim()) { Alert.alert('Login Failed', 'Incorrect email or password. Contact your Admin if you do not have an account.'); return; }
 
       if (data.is_suspended === 1 || data.is_suspended === true) {
         Alert.alert(
@@ -52,7 +57,7 @@ export default function LecturerLogin() {
         return;
       }
 
-      if (rememberMe) await AsyncStorage.setItem('lecturer_remember', JSON.stringify({ em: trimEmail, pw: trimPwd }));
+      if (rememberMe) await AsyncStorage.setItem('lecturer_remember', JSON.stringify({ em: email.trim().toLowerCase(), pw: password.trim() }));
       else await AsyncStorage.removeItem('lecturer_remember');
 
       await AsyncStorage.setItem('current_lecturer', JSON.stringify(data));
@@ -75,19 +80,21 @@ export default function LecturerLogin() {
       <Text style={styles.title}>Lecturer Login</Text>
       <Text style={styles.subtitle}>Your account is created by the Admin</Text>
 
-      <View style={styles.inputBox}>
+      <View style={[styles.inputBox, emailError ? styles.inputError : null]}>
         <Ionicons name="mail-outline" size={20} color="#534AB7" style={styles.icon} />
         <TextInput
           style={styles.input}
-          placeholder="Email address"
+          placeholder="Email address e.g. john@msu.ac.zw"
           placeholderTextColor="#aaa"
           value={email}
-          onChangeText={setEmail}
+          onChangeText={(t) => { setEmail(t); setEmailError(validateEmail(t)); }}
           keyboardType="email-address"
           autoCapitalize="none"
           autoCorrect={false}
         />
+        {email.length > 0 && !emailError && <Ionicons name="checkmark-circle" size={18} color="#1D9E75" />}
       </View>
+      {emailError ? <Text style={styles.errorText}>{emailError}</Text> : null}
 
       <View style={styles.inputBox}>
         <Ionicons name="lock-closed-outline" size={20} color="#534AB7" style={styles.icon} />
@@ -134,10 +141,12 @@ const styles = StyleSheet.create({
   iconBox: { width: 100, height: 100, borderRadius: 50, backgroundColor: '#1a1650', alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: '#534AB7', marginBottom: 16 },
   title: { fontSize: 28, fontWeight: 'bold', color: '#ffffff', textAlign: 'center' },
   subtitle: { fontSize: 14, color: '#a0c4ff', marginTop: 4, marginBottom: 24, textAlign: 'center' },
-  inputBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0a1a2e', borderWidth: 1, borderColor: '#534AB7', width: '100%', padding: 14, borderRadius: 12, marginBottom: 14 },
+  inputBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0a1a2e', borderWidth: 1, borderColor: '#534AB7', width: '100%', padding: 14, borderRadius: 12, marginBottom: 4 },
+  inputError: { borderColor: '#D85A30' },
   icon: { marginRight: 10 },
   input: { flex: 1, fontSize: 15, color: '#ffffff' },
-  rememberRow: { flexDirection: 'row', alignItems: 'center', gap: 10, width: '100%', marginBottom: 16 },
+  errorText: { color: '#D85A30', fontSize: 12, width: '100%', marginBottom: 10, marginTop: 2, paddingLeft: 4 },
+  rememberRow: { flexDirection: 'row', alignItems: 'center', gap: 10, width: '100%', marginBottom: 16, marginTop: 8 },
   checkbox: { width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: '#534AB7', alignItems: 'center', justifyContent: 'center' },
   checkboxChecked: { backgroundColor: '#534AB7' },
   rememberText: { color: '#a0c4ff', fontSize: 14 },

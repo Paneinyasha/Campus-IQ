@@ -111,6 +111,24 @@ export default function QuizSet() {
     );
   };
 
+  // FIX: Wrap finishQuiz in a retry helper to handle transient network failures
+  const withRetry = async (fn: () => Promise<any>, retries = 3, delayMs = 1000): Promise<any> => {
+    for (let attempt = 0; attempt < retries; attempt++) {
+      try {
+        return await fn();
+      } catch (err: any) {
+        const isNetwork = err?.message?.toLowerCase().includes('network') ||
+          err?.message?.toLowerCase().includes('fetch') ||
+          err?.message?.toLowerCase().includes('typeerror');
+        if (isNetwork && attempt < retries - 1) {
+          await new Promise(res => setTimeout(res, delayMs * (attempt + 1)));
+          continue;
+        }
+        throw err;
+      }
+    }
+  };
+
   const finishQuiz = async (finalAnswers?: any[]) => {
     clearInterval(timerRef.current);
     const ans = finalAnswers || answers;
@@ -125,16 +143,21 @@ export default function QuizSet() {
       const saved = await AsyncStorage.getItem('current_student');
       if (saved) {
         const s = JSON.parse(saved);
-        await supabase.from('quiz_results').insert({
-          quiz_id: activeQuiz.id,
-          student_reg: s.reg_number,
-          student_id: s.id,
-          score,
-          total: mcqQuestions.length,
-          answers: JSON.stringify(ans),
-        });
+        await withRetry(() =>
+          supabase.from('quiz_results').insert({
+            quiz_id: activeQuiz.id,
+            student_reg: s.reg_number,
+            student_id: s.id,
+            score,
+            total: mcqQuestions.length,
+            answers: JSON.stringify(ans),
+          })
+        );
       }
-    } catch (e) {}
+    } catch (e) {
+      // Still show results even if saving failed
+      console.warn('Could not save quiz result:', e);
+    }
     setFinished(true);
   };
 
